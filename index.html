@@ -422,7 +422,15 @@
     font-family:'IBM Plex Mono',monospace;
     color:var(--ink);
     display:flex;
-    align-items:center;
+    flex-direction:column;
+    justify-content:center;
+    align-items:flex-start;
+  }
+  .leg-dist .sub, .leg-time .sub{
+    font-family:'Inter',sans-serif;
+    font-weight:400;
+    font-size:10.5px;
+    color:var(--ink-soft);
   }
   .rest-cell{
     font-family:'IBM Plex Mono',monospace;
@@ -738,21 +746,12 @@
   }
   #findStationsBtn:hover{background:var(--band-soft);}
   #findStationsBtn:disabled{opacity:0.5;cursor:default;}
-  #stationList{
-    display:flex;
-    flex-direction:column;
-    gap:12px;
-    margin-top:14px;
+  .fuel-stop-row{background:#FDF6ED !important;}
+  .fuel-stop-row .fuel-icon{
+    background:#F3DDBB;
+    color:#7A4118;
   }
-  .station-group{display:flex;flex-direction:column;gap:6px;}
-  .station-group-label{
-    font-family:'IBM Plex Mono',monospace;
-    font-size:10.5px;
-    text-transform:uppercase;
-    letter-spacing:0.05em;
-    color:var(--ink-soft);
-  }
-  .station-group-chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .fuel-stop-row .fuel-name{grid-column:2/4;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
   .station-chip{
     font-family:'IBM Plex Mono',monospace;
     font-size:11.5px;
@@ -1060,10 +1059,9 @@
             <span class="status-text" id="stationStatus"></span>
           </div>
         </div>
-        <div id="stationList"></div>
       </div>
       <div class="fuel-footnote">
-        Prices are rough recent averages by country, not a live feed — edit any row to match prices you know are current. Electric charging cost is a single rate since roadside prices vary far more than fuel does. Fill-up stops search OpenStreetMap for up to 3 fuel or charging options within 20 miles of each calculated point along your route — always double-check a station is open/compatible before relying on it.
+        Prices are rough recent averages by country, not a live feed — edit any row to match prices you know are current. Electric charging cost is a single rate since roadside prices vary far more than fuel does. Fill-up stops search OpenStreetMap for up to 3 fuel or charging options within 20 miles of each calculated point along your route and appear as rows in the trip table above — always double-check a station is open/compatible before relying on it.
       </div>
     </div>
 
@@ -1347,24 +1345,42 @@
     return { coords, cumDur, cumDist };
   }
 
-  function coordAtTime(built, targetSeconds){
+  // Linearly interpolates between the two geometry points bracketing idx, assuming constant
+  // speed across that one edge. Matters most on sparse geometry (e.g. a ferry crossing, which
+  // OSRM often represents as one long edge) — snapping to the prior point alone can land tens of
+  // km short of the actual target; most road edges are short enough that this is a minor refinement.
+  function interpolateAlong(built, idx, cumArr, target){
     const { coords, cumDur, cumDist } = built;
+    if (idx >= coords.length-1 || cumArr[idx+1] === undefined){
+      const [lon, lat] = coords[idx];
+      return { lat, lon, idx, dur: cumDur[idx], dist: cumDist[idx] };
+    }
+    const span = cumArr[idx+1] - cumArr[idx];
+    const frac = span>0 ? Math.min(1, Math.max(0, (target-cumArr[idx])/span)) : 0;
+    const [lon0, lat0] = coords[idx], [lon1, lat1] = coords[idx+1];
+    return {
+      lat: lat0+(lat1-lat0)*frac, lon: lon0+(lon1-lon0)*frac, idx,
+      dur: cumDur[idx]+(cumDur[idx+1]-cumDur[idx])*frac,
+      dist: cumDist[idx]+(cumDist[idx+1]-cumDist[idx])*frac
+    };
+  }
+
+  function coordAtTime(built, targetSeconds){
+    const { cumDur } = built;
     let idx = 0;
     for (let i=0;i<cumDur.length;i++){
       if (cumDur[i] <= targetSeconds) idx = i; else break;
     }
-    const [lon, lat] = coords[idx];
-    return { lat, lon, idx, dur: cumDur[idx], dist: cumDist[idx] };
+    return interpolateAlong(built, idx, cumDur, targetSeconds);
   }
 
   function coordAtDistance(built, targetMeters){
-    const { coords, cumDur, cumDist } = built;
+    const { cumDist } = built;
     let idx = 0;
     for (let i=0;i<cumDist.length;i++){
       if (cumDist[i] <= targetMeters) idx = i; else break;
     }
-    const [lon, lat] = coords[idx];
-    return { lat, lon, idx, dur: cumDur[idx], dist: cumDist[idx] };
+    return interpolateAlong(built, idx, cumDist, targetMeters);
   }
 
   function renderTownsPlaceholder(){
@@ -1402,11 +1418,11 @@
     lastTotals = null;
     lastFuelLegs = [];
     lastRouteSegments = [];
+    lastFuelStopRows = [];
     fuelControls.style.display = 'none';
     fuelPlaceholder.style.display = 'block';
     fuelTable.innerHTML = '';
     fuelRangeControls.style.display = 'none';
-    stationList.innerHTML = '';
     stationStatus.textContent = '';
     tollPlaceholder.style.display = 'block';
     tollTable.innerHTML = '';
@@ -1440,6 +1456,7 @@
         const route = await getRoute(segStart, segEnd);
         const built = buildCumulative(route);
         const segDuration = route.duration, segDistance = route.distance;
+        const segStartDur = runningDur, segStartDist = runningDist;
 
         const numLegsSeg = Math.max(1, Math.ceil(segDuration/prefSeconds));
         const perLeg = segDuration/numLegsSeg;
@@ -1453,7 +1470,7 @@
         runningDist += segDistance;
         totalLegs += numLegsSeg;
 
-        lastRouteSegments.push({ built, segDistance });
+        lastRouteSegments.push({ built, segDistance, segStartDur, segStartDist });
 
         const isLastSeg = s === mandatory.length-2;
         globalWaypoints.push({
@@ -1577,6 +1594,7 @@
   let unitState = 'mi';
   let lastMandatoryStops = []; // [{lat,lon,label}] — start, vias, end in route order, for exports
   let lastRouteCoords = []; // full route polyline as [lon,lat] pairs, for GPX/KML track export
+  let lastFuelStopRows = []; // [{legIndex, stations, distFromLegStart, timeFromLegStart, timeToLegEnd}] — rendered as rows in the results table
 
   /* ---------- Fuel cost estimate ---------- */
   const FUEL_DEFAULTS = { // approx. avg price per litre in GBP — rough, editable starting points
@@ -1611,7 +1629,7 @@
         efficiencyLabel = $('efficiencyLabel'), currencyInput = $('currencyInput'),
         fuelControls = $('fuelControls'), fuelPlaceholder = $('fuelPlaceholder'), fuelTable = $('fuelTable'),
         fuelRangeControls = $('fuelRangeControls'), rangeInput = $('rangeInput'), rangeLabel = $('rangeLabel'),
-        findStationsBtn = $('findStationsBtn'), stationStatus = $('stationStatus'), stationList = $('stationList');
+        findStationsBtn = $('findStationsBtn'), stationStatus = $('stationStatus');
 
   function refreshRangeLabel(oldUnit){
     rangeLabel.textContent = 'Range between fill-ups (' + (unitState==='mi' ? 'mi' : 'km') + ')';
@@ -2031,7 +2049,7 @@
   });
   resultsArea.addEventListener('keydown', e=>{
     if (e.key !== 'Enter' && e.key !== ' ') return;
-    const chip = e.target.closest('.town-chip, .amenity-chip');
+    const chip = e.target.closest('.town-chip, .amenity-chip, .station-chip');
     if (!chip) return;
     e.preventDefault();
     chip.click();
@@ -2059,12 +2077,38 @@
     return `<span class="station-chip" tabindex="0" role="button" data-lat="${s.lat}" data-lon="${s.lon}" data-name="${s.name.replace(/"/g,'&quot;')}" title="Show on map">⛽ ${s.name} <span class="dist">${townDistLabel(s.dist)} off-route</span></span>`;
   }
 
-  function stationGroupHtml(stations, fillPointIndex){
-    const label = `<div class="station-group-label">Fill-up ${fillPointIndex}</div>`;
-    if (!stations.length){
-      return `<div class="station-group">${label}<div class="station-group-chips"><span class="station-chip" style="cursor:default;"><span class="miss-icon">✕</span> no station found within 20mi</span></div></div>`;
-    }
-    return `<div class="station-group">${label}<div class="station-group-chips">${stations.map(stationChipHtml).join('')}</div></div>`;
+  function fuelStopNameHtml(row){
+    if (row.stations === null) return '<span class="towns-loading">searching…</span>';
+    if (row.stations === 'ERROR') return '<span class="towns-loading err-text">search failed</span>';
+    if (!row.stations.length) return '<span class="towns-loading">no station found within 20mi</span>';
+    return row.stations.map(stationChipHtml).join('');
+  }
+
+  function fuelStopRowHtml(row){
+    return `
+      <div class="leg-row fuel-stop-row">
+        <div class="leg-num fuel-icon">⛽</div>
+        <div class="leg-place fuel-name">${fuelStopNameHtml(row)}</div>
+        <div class="leg-dist">${fmtDist(row.distFromLegStart)}<span class="sub">into leg</span></div>
+        <div class="leg-time">${fmtHours(row.timeFromLegStart)}<span class="sub">from last leg</span></div>
+        <div class="rest-cell">${fmtHours(row.timeToLegEnd)}<span class="sub">to next leg</span></div>
+        <div class="towns-cell"></div>
+      </div>`;
+  }
+
+  // Inserts lastFuelStopRows into the results table, grouped under the leg row they fall within.
+  // Called after every search update (progressive rendering) and after any full skeleton re-render
+  // (e.g. a km/mi toggle), since that wipes and rebuilds the table from scratch.
+  function renderFuelStopRows(){
+    document.querySelectorAll('.fuel-stop-row').forEach(el=>el.remove());
+    if (!lastFuelStopRows.length) return;
+    const byLeg = {};
+    lastFuelStopRows.forEach(row=>{ (byLeg[row.legIndex] = byLeg[row.legIndex] || []).push(row); });
+    Object.keys(byLeg).forEach(legIndexStr=>{
+      const legRow = document.querySelector(`.leg-row[data-leg="${legIndexStr}"]`);
+      if (!legRow) return;
+      legRow.insertAdjacentHTML('afterend', byLeg[legIndexStr].map(fuelStopRowHtml).join(''));
+    });
   }
 
   function drawStationMarker(lat, lon, name){
@@ -2081,8 +2125,17 @@
     registerMarker(markerKey('station:', lat, lon), marker, 7, '#B5493A');
   }
 
+  // Finds which leg a given cumulative route distance falls within, using legDataCache's
+  // cumulative per-waypoint distances (leg i spans legDataCache[i] to legDataCache[i+1]).
+  function legIndexForDistance(globalDist){
+    for (let i=0;i<legDataCache.length-1;i++){
+      if (globalDist <= legDataCache[i+1].dist) return i;
+    }
+    return Math.max(0, legDataCache.length-2);
+  }
+
   async function findFuelStations(){
-    if (!lastRouteSegments.length) return;
+    if (!lastRouteSegments.length || !legDataCache.length) return;
     if (isFileProtocol){
       stationStatus.textContent = 'Fill-up search needs the page served over http(s) — see the notice above.';
       stationStatus.className = 'status-text err';
@@ -2097,18 +2150,30 @@
     const rangeMeters = rangeRaw * (unitState==='mi' ? 1609.344 : 1000);
     const amenityTag = fuelTypeInput.value === 'electric' ? 'charging_station' : 'fuel';
 
-    // gather fill-up points — the range resets at each via/mandatory stop, same assumption as the rest-break logic
+    // gather fill-up points — the range resets at each via/mandatory stop, same assumption as the rest-break logic —
+    // and place each one relative to the leg it falls within (for the "from last leg" / "to next leg" columns)
     const fillPoints = [];
     lastRouteSegments.forEach(seg=>{
       for (let d=rangeMeters; d<seg.segDistance; d+=rangeMeters){
-        fillPoints.push(coordAtDistance(seg.built, d));
+        const pt = coordAtDistance(seg.built, d);
+        const globalDist = seg.segStartDist + pt.dist;
+        const globalDur = seg.segStartDur + pt.dur;
+        const legIndex = legIndexForDistance(globalDist);
+        fillPoints.push({
+          lat: pt.lat, lon: pt.lon, legIndex,
+          distFromLegStart: globalDist - legDataCache[legIndex].dist,
+          timeFromLegStart: globalDur - legDataCache[legIndex].dur,
+          timeToLegEnd: Math.max(0, legDataCache[legIndex+1].dur - globalDur)
+        });
       }
     });
+
+    lastFuelStopRows = [];
+    renderFuelStopRows();
 
     if (!fillPoints.length){
       stationStatus.textContent = 'Your whole route fits within one range — no fill-up needed.';
       stationStatus.className = 'status-text ok';
-      stationList.innerHTML = '';
       stationMarkers.forEach(m => leafletMap && leafletMap.removeLayer(m));
       stationMarkers = [];
       Object.keys(markerRegistry).forEach(k=>{ if (k.startsWith('station:')) delete markerRegistry[k]; });
@@ -2116,23 +2181,24 @@
     }
 
     findStationsBtn.disabled = true;
-    stationList.innerHTML = '';
     const map = ensureMap();
     clearMarkerGroup(map, stationMarkers, 'station:');
 
-    let html = '';
+    lastFuelStopRows = fillPoints.map(fp => Object.assign({}, fp, { stations: null }));
+    renderFuelStopRows();
+
     for (let i=0;i<fillPoints.length;i++){
       stationStatus.textContent = `Searching fill-up point ${i+1} of ${fillPoints.length}…`;
       stationStatus.className = 'status-text';
       try {
         const stations = await stationsNear(fillPoints[i].lat, fillPoints[i].lon, amenityTag, STATION_SEARCH_RADIUS_METERS, STATION_OPTIONS_PER_STOP);
-        html += stationGroupHtml(stations, i+1);
+        lastFuelStopRows[i].stations = stations;
         stations.forEach(s => drawStationMarker(s.lat, s.lon, s.name));
       } catch(e){
         console.error('stationsNear failed', e);
-        html += `<div class="station-group"><div class="station-group-label">Fill-up ${i+1}</div><div class="station-group-chips"><span class="station-chip" style="cursor:default;"><span class="miss-icon">✕</span> search failed</span></div></div>`;
+        lastFuelStopRows[i].stations = 'ERROR';
       }
-      stationList.innerHTML = html;
+      renderFuelStopRows();
       await sleep(1100);
     }
 
@@ -2142,7 +2208,7 @@
   }
 
   findStationsBtn.addEventListener('click', findFuelStations);
-  stationList.addEventListener('click', e=>{
+  resultsArea.addEventListener('click', e=>{
     const chip = e.target.closest('.station-chip');
     if (!chip || !chip.dataset.lat) return;
     const lat = parseFloat(chip.dataset.lat), lon = parseFloat(chip.dataset.lon);
@@ -2150,13 +2216,6 @@
     document.querySelectorAll('.station-chip.chip-active').forEach(c=>c.classList.remove('chip-active'));
     chip.classList.add('chip-active');
     activateRegisteredMarker(markerKey('station:', lat, lon), 'Fill-up stop', chip.dataset.name || 'Station');
-  });
-  stationList.addEventListener('keydown', e=>{
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    const chip = e.target.closest('.station-chip');
-    if (!chip) return;
-    e.preventDefault();
-    chip.click();
   });
 
   function townsCellContent(to){
@@ -2218,6 +2277,7 @@
   function reRenderForUnits(){
     if (!lastTotals || !legDataCache.length) return;
     renderSkeleton(legDataCache, lastTotals.numLegs, lastTotals.totalDistance, lastTotals.totalDuration, lastTotals.restMinutes);
+    renderFuelStopRows();
   }
 
   function updateStopLabel(waypointIndex, label){
