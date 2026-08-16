@@ -164,10 +164,7 @@
     box-shadow:inset 0 0 0 2px var(--amber);
     background:var(--amber-soft);
   }
-  .input-cell.active-cell{box-shadow:inset 0 0 0 2px var(--road);}
   .input-cell select{cursor:pointer;}
-
-  .unit-cell{display:flex;align-items:center;padding:0 12px;}
 
   .amenity-filters{
     display:flex;
@@ -410,6 +407,17 @@
     color:var(--ink-soft);
     margin-top:2px;
   }
+  .leg-map-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
+  .leg-map-link{
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:400;
+    font-size:10.5px;
+    color:var(--road);
+    text-decoration:none;
+    border-bottom:1px dotted var(--road);
+    white-space:nowrap;
+  }
+  .leg-map-link:hover{color:var(--band);border-color:var(--band);}
   .leg-dist,.leg-time{
     font-family:'IBM Plex Mono',monospace;
     color:var(--ink);
@@ -816,6 +824,28 @@
     }
     .input-grid,.action-row{grid-template-columns:28px 120px 1fr;}
   }
+
+  /* ---------- Print trip sheet ---------- */
+  .print-only{display:none;}
+  .print-header .print-title{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;}
+  .print-header .print-trip-name{font-family:'Space Grotesk',sans-serif;font-size:15px;margin-top:2px;}
+  .print-header .print-route-summary{font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:8px;}
+  .print-header .print-generated{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-soft);margin-top:2px;margin-bottom:18px;}
+  @media print{
+    .print-only{display:block;}
+    .topband, .file-protocol-notice, .input-grid, .action-row, .map-section,
+    .fuel-controls, .fuel-range-controls, .leg-map-links, .footnote, .fuel-footnote,
+    .via-remove-btn, .popup-add-btn{
+      display:none !important;
+    }
+    body, .sheet-wrap{background:#fff;}
+    .sheet-wrap{max-width:100%;padding:0;margin:0;}
+    .results-head{background:#fff !important;color:#000 !important;border-bottom:2px solid #000;}
+    .results-head div{border-right:1px solid #ccc;}
+    input, select{border:none !important;background:transparent !important;padding:0 !important;-webkit-appearance:none;appearance:none;-moz-appearance:textfield;}
+    .leg-row, .fuel-row, .totals-row{break-inside:avoid;}
+    a{color:#000 !important;text-decoration:none;}
+  }
 </style>
 </head>
 <body>
@@ -842,6 +872,8 @@
 <div class="sheet-wrap">
 
   <div id="roadtripPanel">
+
+    <div id="printHeader" class="print-only"></div>
 
     <div class="file-protocol-notice" id="fileProtocolNotice" style="display:none;">
       <strong>Nearby towns, overnight stops, and fill-up stations won't work opened this way.</strong>
@@ -937,6 +969,17 @@
         <button id="loadRouteBtn" class="secondary-btn">⬆ Load route</button>
         <input type="file" id="loadRouteFile" accept=".json,application/json" style="display:none;">
         <span class="status-text" id="saveLoadStatus">Save this trip as a file, or load one you saved before.</span>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <div class="rowhead">9</div>
+      <div class="label-cell">Export</div>
+      <div class="action-cell">
+        <button id="exportGpxBtn" class="secondary-btn">⬇ Export GPX</button>
+        <button id="exportKmlBtn" class="secondary-btn">⬇ Export KML</button>
+        <button id="printTripBtn" class="secondary-btn">🖨 Print / Save as PDF</button>
+        <span class="status-text">GPX/KML for satnavs and apps like OsmAnd or Organic Maps.</span>
       </div>
     </div>
 
@@ -1424,6 +1467,9 @@
       }
 
       const totalDuration = runningDur, totalDistance = runningDist;
+      lastMandatoryStops = mandatory;
+      lastRouteCoords = allCoords;
+      updatePrintHeader(startPt.label, endPt.label, totalDistance, totalDuration);
 
       // render skeleton rows immediately (with placeholders for reverse-geocoded stop names + towns)
       renderSkeleton(globalWaypoints, totalLegs, totalDistance, totalDuration, restMinutes);
@@ -1529,6 +1575,8 @@
   let lastTotals = null;
   let townsCacheByIndex = {};
   let unitState = 'mi';
+  let lastMandatoryStops = []; // [{lat,lon,label}] — start, vias, end in route order, for exports
+  let lastRouteCoords = []; // full route polyline as [lon,lat] pairs, for GPX/KML track export
 
   /* ---------- Fuel cost estimate ---------- */
   const FUEL_DEFAULTS = { // approx. avg price per litre in GBP — rough, editable starting points
@@ -2127,6 +2175,15 @@
     return `${fmtHours(legDur+restSeconds)}<span class="sub">${fmtHours(legDur)} drive, incl. ${restMinutes}m break mid-leg</span>`;
   }
 
+  function mapsLinksHtml(from, to){
+    const gmaps = `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lon}&destination=${to.lat},${to.lon}&travelmode=driving`;
+    const amaps = `https://maps.apple.com/?saddr=${from.lat},${from.lon}&daddr=${to.lat},${to.lon}&dirflg=d`;
+    return `<div class="leg-map-links">
+      <a href="${gmaps}" target="_blank" rel="noopener" class="leg-map-link" title="Open this leg in Google Maps">Google Maps ↗</a>
+      <a href="${amaps}" target="_blank" rel="noopener" class="leg-map-link" title="Open this leg in Apple Maps">Apple Maps ↗</a>
+    </div>`;
+  }
+
   function renderSkeleton(waypoints, numLegs, totalDistance, totalDuration, restMinutes){
     legDataCache = waypoints;
     waypoints.forEach((w,idx)=> w._idx = idx);
@@ -2139,7 +2196,7 @@
         <div class="leg-row" data-leg="${i}">
           <div class="leg-num">${i+1}</div>
           <div class="leg-place" id="fromLabel${i}">${from.label ? from.label : '<span class="towns-loading">resolving…</span>'}</div>
-          <div class="leg-place" id="toLabel${i+1}">${to.label ? to.label : '<span class="towns-loading">resolving…</span>'}<span class="sub">~${fmtHours(legDur)} leg</span></div>
+          <div class="leg-place" id="toLabel${i+1}">${to.label ? to.label : '<span class="towns-loading">resolving…</span>'}<span class="sub">~${fmtHours(legDur)} leg</span>${mapsLinksHtml(from, to)}</div>
           <div class="leg-dist">${fmtDist(legDist)}</div>
           <div class="leg-time">${fmtHours(legDur)}</div>
           <div class="rest-cell">${restCellContent(i, numLegs, legDur, restMinutes)}</div>
@@ -2168,7 +2225,8 @@
     const toEl = document.getElementById('toLabel'+waypointIndex);
     if (toEl){
       const sub = toEl.querySelector('.sub');
-      toEl.innerHTML = label + (sub ? sub.outerHTML : '');
+      const links = toEl.querySelector('.leg-map-links');
+      toEl.innerHTML = label + (sub ? sub.outerHTML : '') + (links ? links.outerHTML : '');
     }
     const fromEl = document.getElementById('fromLabel'+waypointIndex);
     if (fromEl) fromEl.textContent = label;
@@ -2519,16 +2577,9 @@
     };
   }
 
-  function saveRoute(){
-    const startQ = startInput.value.trim(), endQ = endInput.value.trim();
-    if (!startQ || !endQ){
-      setSaveLoadStatus('Enter a start and finish before saving.', 'err');
-      return;
-    }
-    const data = serializeRoute();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  function downloadFile(filename, content, mime){
+    const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
-    const filename = `waypoint-${slugify(startQ)}-to-${slugify(endQ)}.json`;
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
@@ -2536,7 +2587,87 @@
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  }
+
+  function saveRoute(){
+    const startQ = startInput.value.trim(), endQ = endInput.value.trim();
+    if (!startQ || !endQ){
+      setSaveLoadStatus('Enter a start and finish before saving.', 'err');
+      return;
+    }
+    const data = serializeRoute();
+    const filename = `waypoint-${slugify(startQ)}-to-${slugify(endQ)}.json`;
+    downloadFile(filename, JSON.stringify(data, null, 2), 'application/json');
     setSaveLoadStatus('Saved as ' + filename, 'ok');
+  }
+
+  /* ---------- GPX / KML export ---------- */
+  function xmlEscape(s){
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+  }
+
+  function mandatoryStopKind(i){
+    if (i===0) return 'Start';
+    if (i===lastMandatoryStops.length-1) return 'Finish';
+    return 'Via stop';
+  }
+
+  function buildGpx(){
+    const tripName = xmlEscape(tabLabel.textContent || 'Road trip');
+    const wpts = lastMandatoryStops.map((s,i)=>
+      `  <wpt lat="${s.lat}" lon="${s.lon}"><name>${xmlEscape(s.label || mandatoryStopKind(i))}</name><type>${mandatoryStopKind(i)}</type></wpt>`
+    ).join('\n');
+    const trkpts = lastRouteCoords.map(c => `      <trkpt lat="${c[1]}" lon="${c[0]}"></trkpt>`).join('\n');
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Waypoint Trip Sheet" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${tripName}</name></metadata>\n${wpts}\n  <trk>\n    <name>${tripName}</name>\n    <trkseg>\n${trkpts}\n    </trkseg>\n  </trk>\n</gpx>`;
+  }
+
+  function buildKml(){
+    const tripName = xmlEscape(tabLabel.textContent || 'Road trip');
+    const placemarks = lastMandatoryStops.map((s,i)=>
+      `    <Placemark><name>${xmlEscape(s.label || mandatoryStopKind(i))}</name><Point><coordinates>${s.lon},${s.lat},0</coordinates></Point></Placemark>`
+    ).join('\n');
+    const coordsStr = lastRouteCoords.map(c => `${c[0]},${c[1]},0`).join(' ');
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n  <name>${tripName}</name>\n${placemarks}\n  <Placemark>\n    <name>Route</name>\n    <LineString><tessellate>1</tessellate><coordinates>${coordsStr}</coordinates></LineString>\n  </Placemark>\n</Document>\n</kml>`;
+  }
+
+  function exportGpx(){
+    if (!lastRouteCoords.length){
+      setSaveLoadStatus('Calculate a route first.', 'err');
+      return;
+    }
+    const filename = `waypoint-${slugify(startInput.value.trim())}-to-${slugify(endInput.value.trim())}.gpx`;
+    downloadFile(filename, buildGpx(), 'application/gpx+xml');
+    setSaveLoadStatus('Exported ' + filename, 'ok');
+  }
+
+  function exportKml(){
+    if (!lastRouteCoords.length){
+      setSaveLoadStatus('Calculate a route first.', 'err');
+      return;
+    }
+    const filename = `waypoint-${slugify(startInput.value.trim())}-to-${slugify(endInput.value.trim())}.kml`;
+    downloadFile(filename, buildKml(), 'application/vnd.google-earth.kml+xml');
+    setSaveLoadStatus('Exported ' + filename, 'ok');
+  }
+
+  /* ---------- Print trip sheet ---------- */
+  function updatePrintHeader(startLabel, endLabel, totalDistance, totalDuration){
+    const dateStr = new Date().toLocaleDateString(undefined, { year:'numeric', month:'long', day:'numeric' });
+    $('printHeader').innerHTML = `
+      <div class="print-header">
+        <div class="print-title">Waypoint — Trip Sheet</div>
+        <div class="print-trip-name">${xmlEscape(tabLabel.textContent)}</div>
+        <div class="print-route-summary">${xmlEscape(startLabel)} → ${xmlEscape(endLabel)} · ${fmtDist(totalDistance)} · ${fmtHours(totalDuration)}</div>
+        <div class="print-generated">Generated ${dateStr}</div>
+      </div>`;
+  }
+
+  function printTripSheet(){
+    if (!lastTotals){
+      setSaveLoadStatus('Calculate a route first.', 'err');
+      return;
+    }
+    window.print();
   }
 
   function applyLoadedRoute(data){
@@ -2608,6 +2739,9 @@
     if (file) loadRouteFromFile(file);
     e.target.value = ''; // allow re-selecting the same filename later
   });
+  $('exportGpxBtn').addEventListener('click', exportGpx);
+  $('exportKmlBtn').addEventListener('click', exportKml);
+  $('printTripBtn').addEventListener('click', printTripSheet);
 
   // delegated — popup buttons are injected by Leaflet outside our normal DOM containers
   document.addEventListener('click', e=>{
