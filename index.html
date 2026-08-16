@@ -169,6 +169,18 @@
 
   .unit-cell{display:flex;align-items:center;padding:0 12px;}
 
+  .amenity-filters{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px 16px;
+    padding:9px 12px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    color:var(--ink);
+  }
+  .amenity-filters label{display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;}
+  .amenity-filters input[type="checkbox"]{cursor:pointer;}
+
   .topband-right{
     display:flex;
     align-items:center;
@@ -217,7 +229,12 @@
   }
   .unit-switch:hover .unit-switch-track{background:rgba(255,255,255,0.22);}
 
-  .via-rowhead{background:#F2EDF6;color:#7A4FA3;font-weight:600;}
+  .via-rowhead{background:#F2EDF6;color:#7A4FA3;font-weight:600;cursor:grab;gap:2px;flex-direction:column;user-select:none;}
+  .via-rowhead:active{cursor:grabbing;}
+  .via-rowhead .via-grip{font-size:11px;line-height:1;opacity:0.6;letter-spacing:-1px;}
+  .via-rowhead .via-num{font-size:11px;line-height:1;}
+  .via-rowhead.dragging{opacity:0.4;}
+  .via-rowhead.drag-over{box-shadow:inset 0 2px 0 var(--amber), inset 0 -2px 0 var(--amber);}
   .via-remove-btn{
     position:absolute;
     top:50%;
@@ -438,6 +455,27 @@
   }
   .town-chip.chip-active .dist{color:#C7D3C9;}
   .town-chip .dist{color:var(--ink-soft);}
+  .amenity-chip-row{width:100%;display:flex;flex-wrap:wrap;gap:6px;}
+  .amenity-chip-row:empty{display:none;}
+  .amenity-chip{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;
+    padding:3px 8px;
+    border-radius:20px;
+    white-space:nowrap;
+    cursor:pointer;
+    border:1px solid transparent;
+  }
+  .amenity-chip .dist{opacity:0.75;}
+  .amenity-chip.chip-hotel{background:#F5E7F1;color:#7A3F6E;border-color:#E4C9DC;}
+  .amenity-chip.chip-hotel:hover, .amenity-chip.chip-hotel:focus{background:#EBD2E3;border-color:#A85D9E;outline:none;}
+  .amenity-chip.chip-hotel.chip-active{background:#A85D9E;color:#fff;border-color:#A85D9E;}
+  .amenity-chip.chip-campsite{background:#E9F1E3;color:#3A5E2C;border-color:#CFE2C3;}
+  .amenity-chip.chip-campsite:hover, .amenity-chip.chip-campsite:focus{background:#D9EACB;border-color:#4C8C3B;outline:none;}
+  .amenity-chip.chip-campsite.chip-active{background:#4C8C3B;color:#fff;border-color:#4C8C3B;}
+  .amenity-chip.chip-parking{background:#EDEDED;color:#4A4A4A;border-color:#D6D6D6;}
+  .amenity-chip.chip-parking:hover, .amenity-chip.chip-parking:focus{background:#DFDFDF;border-color:#6E6E6E;outline:none;}
+  .amenity-chip.chip-parking.chip-active{background:#6E6E6E;color:#fff;border-color:#6E6E6E;}
   .place-tag{
     font-family:'Inter',sans-serif;
     font-size:9.5px;
@@ -566,6 +604,17 @@
     font-size:12px;
   }
   .leaflet-popup-content .pop-title{font-weight:600;font-family:'Space Grotesk',sans-serif;font-size:13px;}
+  .leaflet-popup-content .pop-hint{margin-top:6px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-soft);}
+  .auto-stop-icon{background:transparent;border:none;}
+  .auto-stop-dot{
+    width:14px;height:14px;margin:2px;
+    border-radius:50%;
+    background:#DD9A2E;
+    border:2px solid #fff;
+    box-shadow:0 1px 3px rgba(0,0,0,0.4);
+    cursor:grab;
+  }
+  .leaflet-marker-dragging .auto-stop-dot{cursor:grabbing;}
   .popup-add-btn{
     display:block;
     margin-top:7px;
@@ -795,8 +844,8 @@
   <div id="roadtripPanel">
 
     <div class="file-protocol-notice" id="fileProtocolNotice" style="display:none;">
-      <strong>Nearby towns and fill-up stations won't work opened this way.</strong>
-      This file is running directly from disk (<code>file://</code>), and the free map-data service behind those two features (Overpass) blocks that. Routing, place names, distances, and the fuel cost estimate are unaffected. To get the full tool: use it here in the chat, or serve the file locally — from its folder, run <code>python -m http.server 8000</code> and open <code>http://localhost:8000/</code> plus the filename.
+      <strong>Nearby towns, overnight stops, and fill-up stations won't work opened this way.</strong>
+      This file is running directly from disk (<code>file://</code>), and the free map-data service behind those features (Overpass) blocks that. Routing, place names, distances, and the fuel cost estimate are unaffected. To get the full tool: use it here in the chat, or serve the file locally — from its folder, run <code>python -m http.server 8000</code> and open <code>http://localhost:8000/</code> plus the filename.
     </div>
 
     <div class="input-grid">
@@ -859,9 +908,20 @@
           <option value="60">1 hour during each leg</option>
         </select>
       </div>
+
+      <div class="rowhead">6</div>
+      <div class="label-cell">Overnight stops (A6)</div>
+      <div class="input-cell">
+        <div class="amenity-filters">
+          <label><input type="checkbox" id="filterHotels"> 🏨 Hotels</label>
+          <label><input type="checkbox" id="filterCampsites"> 🏕 Campsites</label>
+          <label><input type="checkbox" id="filterParking"> 🅿️ Overnight parking</label>
+          <label title="Filters to places OpenStreetMap has explicitly tagged as allowing dogs — most listings aren't tagged either way, so this narrows results rather than confirming everything else isn't pet-friendly."><input type="checkbox" id="filterPetFriendly"> 🐾 Pet-friendly only</label>
+        </div>
+      </div>
     </div>
     <div class="action-row">
-      <div class="rowhead">6</div>
+      <div class="rowhead">7</div>
       <div class="label-cell">Run</div>
       <div class="action-cell">
         <button id="calcBtn">Calculate route</button>
@@ -870,7 +930,7 @@
     </div>
 
     <div class="action-row">
-      <div class="rowhead">7</div>
+      <div class="rowhead">8</div>
       <div class="label-cell">Save / load</div>
       <div class="action-cell">
         <button id="saveRouteBtn" class="secondary-btn">⬇ Save route</button>
@@ -897,6 +957,9 @@
           <span><span class="legend-dot" style="background:#3B6E8F;"></span>finish</span>
           <span><span class="legend-dot" style="background:#1B8A7A;"></span>nearby town</span>
           <span><span class="legend-dot" style="background:#B5493A;"></span>fill-up stop</span>
+          <span><span class="legend-dot" style="background:#A85D9E;"></span>hotel</span>
+          <span><span class="legend-dot" style="background:#4C8C3B;"></span>campsite</span>
+          <span><span class="legend-dot" style="background:#6E6E6E;"></span>parking</span>
         </span>
       </div>
       <div class="map-outer">
@@ -1083,9 +1146,17 @@
   ];
 
   async function overpassFetch(url){
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP '+res.status);
-    return res.json();
+    // some mirrors/proxies hang instead of erroring under load — without a timeout that stalls
+    // the whole sequential search pass, so force a move to the next fallback after 15s
+    const controller = new AbortController();
+    const timer = setTimeout(()=> controller.abort(), 15000);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error('HTTP '+res.status);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   function parseOverpassTowns(data, lat, lon){
@@ -1154,6 +1225,71 @@
     const towns = parseOverpassTowns(data, lat, lon);
     townsGeoCache.set(key, towns);
     return towns;
+  }
+
+  /* ---------- Overnight stop amenity search ---------- */
+  const amenityGeoCache = new Map(); // "lat,lon@radius|flags" -> amenities array
+
+  function amenityFilterState(){
+    return {
+      hotels: $('filterHotels').checked,
+      campsites: $('filterCampsites').checked,
+      parking: $('filterParking').checked,
+      petOnly: $('filterPetFriendly').checked
+    };
+  }
+
+  function amenityFiltersActive(f){
+    return f.hotels || f.campsites || f.parking || f.petOnly;
+  }
+
+  async function nearbyAmenities(lat, lon, radiusMeters, filters){
+    // "pet-friendly only" with no type checked implicitly searches hotels+campsites,
+    // since a bare parking spot rarely carries a dog tag worth filtering on
+    const wantHotels = filters.hotels || (filters.petOnly && !filters.hotels && !filters.campsites && !filters.parking);
+    const wantCampsites = filters.campsites || (filters.petOnly && !filters.hotels && !filters.campsites && !filters.parking);
+    const clauses = [];
+    if (wantHotels) clauses.push(`node(around:${radiusMeters},${lat},${lon})[tourism~"^(hotel|guest_house|motel)$"];`);
+    if (wantCampsites) clauses.push(`node(around:${radiusMeters},${lat},${lon})[tourism~"^(camp_site|caravan_site)$"];`);
+    if (filters.parking) clauses.push(`node(around:${radiusMeters},${lat},${lon})[amenity=parking];`);
+    if (!clauses.length) return [];
+
+    const flags = (filters.hotels?'h':'')+(filters.campsites?'c':'')+(filters.parking?'p':'')+(filters.petOnly?'d':'');
+    const key = lat.toFixed(5)+','+lon.toFixed(5)+'@'+radiusMeters+'|'+flags;
+    if (amenityGeoCache.has(key)) return amenityGeoCache.get(key);
+
+    const query = `[out:json][timeout:25];(${clauses.join('')});out body 40;`;
+    const data = await overpassQuery(query);
+    let results = (data.elements||[])
+      .filter(el => el.tags && typeof el.lat === 'number')
+      .map(el=>{
+        const tags = el.tags;
+        let type, icon;
+        if (tags.tourism==='camp_site' || tags.tourism==='caravan_site'){ type='campsite'; icon='🏕'; }
+        else if (tags.amenity==='parking'){ type='parking'; icon='🅿️'; }
+        else { type='hotel'; icon='🏨'; }
+        return {
+          name: tags.name || (type==='hotel'?'Hotel':type==='campsite'?'Campsite':'Parking'),
+          type, icon,
+          petFriendly: tags.dog==='yes' || tags.dog==='leashed',
+          lat: el.lat, lon: el.lon,
+          dist: haversine(lat, lon, el.lat, el.lon)
+        };
+      });
+    if (filters.petOnly) results = results.filter(r=>r.petFriendly);
+    results = results.sort((a,b)=>a.dist-b.dist).slice(0,8);
+    amenityGeoCache.set(key, results);
+    return results;
+  }
+
+  function amenityChipHtml(a){
+    return `<span class="amenity-chip chip-${a.type}" tabindex="0" role="button" data-lat="${a.lat}" data-lon="${a.lon}" data-name="${a.name.replace(/"/g,'&quot;')}" data-type="${a.type}" title="Show on map">${a.icon} ${a.name}${a.petFriendly?' 🐾':''} <span class="dist">${townDistLabel(a.dist)}</span></span>`;
+  }
+
+  function amenitiesHtml(list){
+    if (list === 'ERROR') return `<span class="towns-loading err-text">overnight-stop search unavailable right now</span>`;
+    if (!list || !list.length) return '';
+    return list.map(amenityChipHtml).join('');
   }
 
   function buildCumulative(route){
@@ -1267,7 +1403,7 @@
 
         for (let i=1;i<numLegsSeg;i++){
           const pt = coordAtTime(built, i*perLeg);
-          globalWaypoints.push({ lat:pt.lat, lon:pt.lon, known:false, type:'auto', dur:runningDur+pt.dur, dist:runningDist+pt.dist });
+          globalWaypoints.push({ lat:pt.lat, lon:pt.lon, known:false, type:'auto', dur:runningDur+pt.dur, dist:runningDist+pt.dist, segIdx:s });
         }
 
         runningDur += segDuration;
@@ -1336,11 +1472,14 @@
 
       // pass 2: nearby towns — slower and lower priority, so it runs after the fuel estimator is already visible
       let townsSeen = 0;
+      const amenityFilters = amenityFilterState();
+      const wantAmenities = amenityFiltersActive(amenityFilters);
       for (let i=0;i<globalWaypoints.length;i++){
         const wp = globalWaypoints[i];
         if (wp.type==='auto'){
           if (isFileProtocol){
             updateTowns(i, 'ERROR');
+            if (wantAmenities) updateAmenities(i, 'ERROR');
             continue;
           }
           townsSeen++;
@@ -1355,6 +1494,21 @@
             updateTowns(i, 'ERROR');
           }
           if (!wasCached) await sleep(1100);
+
+          if (wantAmenities){
+            setStatus(`Finding overnight stops near stop ${townsSeen} of ${autoCount}…`);
+            const amenityFlags = (amenityFilters.hotels?'h':'')+(amenityFilters.campsites?'c':'')+(amenityFilters.parking?'p':'')+(amenityFilters.petOnly?'d':'');
+            const amenityKey = wp.lat.toFixed(5)+','+wp.lon.toFixed(5)+'@'+radiusMeters+'|'+amenityFlags;
+            const amenityWasCached = amenityGeoCache.has(amenityKey);
+            try {
+              const amenities = await nearbyAmenities(wp.lat, wp.lon, radiusMeters, amenityFilters);
+              updateAmenities(i, amenities);
+            } catch(e){
+              console.error('nearbyAmenities failed', e);
+              updateAmenities(i, 'ERROR');
+            }
+            if (!amenityWasCached) await sleep(1100);
+          }
         } else {
           updateTowns(i, null);
         }
@@ -1648,6 +1802,7 @@
   let mapMarkers = {};
   let townMarkers = [];
   let stationMarkers = [];
+  let amenityMarkers = [];
   let markerRegistry = {}; // key -> {marker, baseRadius, baseFill} — lets a chip click "activate" its existing map marker
   let activeMarkerKey = null;
   const mapPlaceholder = $('mapPlaceholder');
@@ -1708,6 +1863,13 @@
     return 'Leg stop';
   }
 
+  const autoStopIcon = L.divIcon({
+    className: 'auto-stop-icon',
+    html: '<div class="auto-stop-dot"></div>',
+    iconSize: [18,18],
+    iconAnchor: [9,9]
+  });
+
   function drawMap(coords, waypoints){
     const map = ensureMap();
     mapPlaceholder.classList.add('hidden');
@@ -1718,19 +1880,32 @@
     mapMarkers = {};
     clearMarkerGroup(map, townMarkers, 'town:');
     clearMarkerGroup(map, stationMarkers, 'station:');
+    clearMarkerGroup(map, amenityMarkers, 'amenity:');
 
     const latlngs = coords.map(c => [c[1], c[0]]);
     routeLine = L.polyline(latlngs, { color:'#3B6E8F', weight:4, opacity:0.85 }).addTo(map);
 
     waypoints.forEach((wp, i)=>{
-      const marker = L.circleMarker([wp.lat, wp.lon], {
-        radius: (wp.type==='start'||wp.type==='end') ? 8 : 7,
-        color:'#fff',
-        weight:2,
-        fillColor: markerColor(wp),
-        fillOpacity:1
-      }).addTo(map);
-      marker.bindPopup(`<div class="pop-title">${markerTitle(wp)}</div>${wp.label || 'Locating…'}`);
+      let marker;
+      if (wp.type === 'auto'){
+        // leg-stop markers are draggable — dropping one pins it as a real via stop at that spot
+        marker = L.marker([wp.lat, wp.lon], { icon: autoStopIcon, draggable:true }).addTo(map);
+        marker.on('dragstart', ()=> marker.closePopup());
+        marker.on('dragend', ()=>{
+          const ll = marker.getLatLng();
+          handleLegStopDrop(wp, ll.lat, ll.lng);
+        });
+      } else {
+        marker = L.circleMarker([wp.lat, wp.lon], {
+          radius: (wp.type==='start'||wp.type==='end') ? 8 : 7,
+          color:'#fff',
+          weight:2,
+          fillColor: markerColor(wp),
+          fillOpacity:1
+        }).addTo(map);
+      }
+      const dragHint = wp.type==='auto' ? '<div class="pop-hint">Drag to pin this stop to an exact spot</div>' : '';
+      marker.bindPopup(`<div class="pop-title">${markerTitle(wp)}</div>${wp.label || 'Locating…'}${dragHint}`);
       mapMarkers[i] = marker;
     });
 
@@ -1743,7 +1918,8 @@
     const marker = mapMarkers[i];
     if (!marker) return;
     const title = i===0 ? 'Start' : 'Leg stop';
-    marker.setPopupContent(`<div class="pop-title">${title}</div>${label}`);
+    const dragHint = i===0 ? '' : '<div class="pop-hint">Drag to pin this stop to an exact spot</div>';
+    marker.setPopupContent(`<div class="pop-title">${title}</div>${label}${dragHint}`);
   }
 
   const TOWN_MARKER_COLOR = '#1B8A7A';
@@ -1766,6 +1942,25 @@
     registerMarker(markerKey('town:', t.lat, t.lon), marker, 6, TOWN_MARKER_COLOR);
   }
 
+  const AMENITY_COLORS = { hotel:'#A85D9E', campsite:'#4C8C3B', parking:'#6E6E6E' };
+  const AMENITY_TITLES = { hotel:'Hotel', campsite:'Campsite', parking:'Parking' };
+
+  function drawAmenityMarker(a){
+    const map = ensureMap();
+    const color = AMENITY_COLORS[a.type] || '#5C6B60';
+    const marker = L.circleMarker([a.lat, a.lon], {
+      radius: 6,
+      color:'#fff',
+      weight:2,
+      fillColor: color,
+      fillOpacity:1
+    }).addTo(map);
+    const name = a.name + (a.petFriendly ? ' 🐾 pet-friendly' : '');
+    marker.bindPopup(popupHtml(AMENITY_TITLES[a.type] || 'Amenity', name, a.lat, a.lon));
+    amenityMarkers.push(marker);
+    registerMarker(markerKey('amenity:', a.lat, a.lon), marker, 6, color);
+  }
+
   // delegated click handler — town chips are re-rendered dynamically so this must live on a stable ancestor
   resultsArea.addEventListener('click', e=>{
     const chip = e.target.closest('.town-chip');
@@ -1776,9 +1971,19 @@
     chip.classList.add('chip-active');
     activateRegisteredMarker(markerKey('town:', lat, lon), 'Nearby town', chip.dataset.name || 'Nearby town');
   });
+  resultsArea.addEventListener('click', e=>{
+    const chip = e.target.closest('.amenity-chip');
+    if (!chip || !chip.dataset.lat) return;
+    const lat = parseFloat(chip.dataset.lat), lon = parseFloat(chip.dataset.lon);
+    if (isNaN(lat) || isNaN(lon)) return;
+    document.querySelectorAll('.amenity-chip.chip-active').forEach(c=>c.classList.remove('chip-active'));
+    chip.classList.add('chip-active');
+    const title = AMENITY_TITLES[chip.dataset.type] || 'Amenity';
+    activateRegisteredMarker(markerKey('amenity:', lat, lon), title, chip.dataset.name || title);
+  });
   resultsArea.addEventListener('keydown', e=>{
     if (e.key !== 'Enter' && e.key !== ' ') return;
-    const chip = e.target.closest('.town-chip');
+    const chip = e.target.closest('.town-chip, .amenity-chip');
     if (!chip) return;
     e.preventDefault();
     chip.click();
@@ -1910,7 +2115,8 @@
     if (to.type === 'end') return '<span class="towns-loading">final destination</span>';
     if (to.type === 'via') return '<span class="towns-loading">your stop</span>';
     const cached = townsCacheByIndex[to._idx];
-    return (cached !== undefined) ? townsHtml(cached) : renderTownsPlaceholder();
+    const townsPart = (cached !== undefined) ? townsHtml(cached) : renderTownsPlaceholder();
+    return `<div id="townList${to._idx}">${townsPart}</div><div class="amenity-chip-row" id="amenities${to._idx}"></div>`;
   }
 
   function restCellContent(legIndex, numLegs, legDur, restMinutes){
@@ -1970,11 +2176,19 @@
 
   function updateTowns(waypointIndex, towns){
     if (towns !== null) townsCacheByIndex[waypointIndex] = towns;
-    const el = document.getElementById('towns'+waypointIndex);
+    const el = document.getElementById('townList'+waypointIndex);
     if (towns === null) return; // leave as-is (start point has no towns cell target)
     if (Array.isArray(towns)) towns.forEach(t => drawTownMarker(t));
     if (!el) return;
     el.innerHTML = townsHtml(towns);
+  }
+
+  function updateAmenities(waypointIndex, list){
+    if (list === null) return;
+    if (Array.isArray(list)) list.forEach(a => drawAmenityMarker(a));
+    const el = document.getElementById('amenities'+waypointIndex);
+    if (!el) return;
+    el.innerHTML = amenitiesHtml(list);
   }
 
   const unitSwitch = $('unitSwitch');
@@ -2106,17 +2320,84 @@
 
   function renumberViaRows(){
     viaRows.forEach((v, idx)=>{
-      v.rowhead.textContent = 'V' + (idx+1);
+      v.numEl.textContent = 'V' + (idx+1);
       v.label.textContent = 'Via stop ' + (idx+1);
     });
   }
 
-  function addViaRow(prefill){
+  // Moves a row's three grid children (rowhead/label/inputCell) to sit immediately before
+  // beforeRowObj's children, or to the end of viaContainer if beforeRowObj is null. Only
+  // correct for inserting a row that isn't in viaRows yet — see resyncViaRowDom for reordering
+  // rows that are already present, where a single insertBefore anchor is ambiguous.
+  function placeViaRowElements(rowObj, beforeRowObj){
+    const ref = beforeRowObj ? beforeRowObj.rowhead : null;
+    if (ref){
+      viaContainer.insertBefore(rowObj.rowhead, ref);
+      viaContainer.insertBefore(rowObj.label, ref);
+      viaContainer.insertBefore(rowObj.inputCell, ref);
+    } else {
+      viaContainer.appendChild(rowObj.rowhead);
+      viaContainer.appendChild(rowObj.label);
+      viaContainer.appendChild(rowObj.inputCell);
+    }
+  }
+
+  // Rebuilds viaContainer's DOM order to match the current viaRows array order — the reliable
+  // way to reflect a drag-reorder, since appendChild moves existing nodes rather than duplicating
+  // them, and viaContainer holds nothing but via-row elements.
+  function resyncViaRowDom(){
+    viaRows.forEach(rowObj=>{
+      viaContainer.appendChild(rowObj.rowhead);
+      viaContainer.appendChild(rowObj.label);
+      viaContainer.appendChild(rowObj.inputCell);
+    });
+  }
+
+  let draggedViaUid = null;
+
+  function wireViaDragHandle(rowObj){
+    const { rowhead } = rowObj;
+    rowhead.draggable = true;
+    rowhead.addEventListener('dragstart', e=>{
+      draggedViaUid = rowObj.uid;
+      rowhead.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', rowObj.uid); // Firefox requires data to be set for drag to start
+    });
+    rowhead.addEventListener('dragend', ()=>{
+      rowhead.classList.remove('dragging');
+      draggedViaUid = null;
+      document.querySelectorAll('.via-rowhead.drag-over').forEach(el=>el.classList.remove('drag-over'));
+    });
+    rowhead.addEventListener('dragover', e=>{
+      if (draggedViaUid===null || draggedViaUid===rowObj.uid) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      rowhead.classList.add('drag-over');
+    });
+    rowhead.addEventListener('dragleave', ()=> rowhead.classList.remove('drag-over'));
+    rowhead.addEventListener('drop', e=>{
+      e.preventDefault();
+      rowhead.classList.remove('drag-over');
+      const draggedObj = viaRows.find(v=>v.uid===draggedViaUid);
+      if (!draggedObj || draggedObj===rowObj) return;
+      const fromIdx = viaRows.indexOf(draggedObj), toIdx = viaRows.indexOf(rowObj);
+      viaRows.splice(fromIdx,1);
+      viaRows.splice(toIdx,0,draggedObj);
+      resyncViaRowDom();
+      renumberViaRows();
+      setSaveLoadStatus('Stop order updated — recalculate to apply.', 'ok');
+    });
+  }
+
+  function addViaRow(prefill, insertIndex){
     viaSeq++;
     const uid = 'via' + viaSeq;
 
     const rowheadEl = document.createElement('div');
     rowheadEl.className = 'rowhead via-rowhead';
+    rowheadEl.title = 'Drag to reorder this stop';
+    rowheadEl.innerHTML = `<span class="via-grip">⠿</span><span class="via-num">V</span>`;
 
     const labelEl = document.createElement('div');
     labelEl.className = 'label-cell';
@@ -2130,10 +2411,6 @@
         <div class="ac-list" id="${uid}AcList"></div>
       </div>`;
 
-    viaContainer.appendChild(rowheadEl);
-    viaContainer.appendChild(labelEl);
-    viaContainer.appendChild(inputCellEl);
-
     const input = inputCellEl.querySelector('input');
     const list = inputCellEl.querySelector('.ac-list');
     const removeBtn = inputCellEl.querySelector('.via-remove-btn');
@@ -2141,9 +2418,20 @@
     const state = { list, input, results:[], hl:-1, coords:null, debounce:null };
     wireAutocomplete(state);
 
-    const rowObj = { uid, rowhead:rowheadEl, label:labelEl, inputCell:inputCellEl, input, acState:state };
-    viaRows.push(rowObj);
+    const rowObj = { uid, rowhead:rowheadEl, label:labelEl, inputCell:inputCellEl, numEl: rowheadEl.querySelector('.via-num'), input, acState:state };
+
+    const atEnd = (insertIndex===undefined || insertIndex===null || insertIndex>=viaRows.length);
+    if (atEnd){
+      viaContainer.appendChild(rowheadEl);
+      viaContainer.appendChild(labelEl);
+      viaContainer.appendChild(inputCellEl);
+      viaRows.push(rowObj);
+    } else {
+      placeViaRowElements(rowObj, viaRows[insertIndex]);
+      viaRows.splice(insertIndex, 0, rowObj);
+    }
     renumberViaRows();
+    wireViaDragHandle(rowObj);
 
     removeBtn.addEventListener('click', ()=>{
       rowheadEl.remove(); labelEl.remove(); inputCellEl.remove();
@@ -2170,6 +2458,23 @@
     setStatus(`${name} added — recalculating route…`);
     viaContainer.scrollIntoView({ behavior:'smooth', block:'center' });
     run(); // unchanged legs are served from cache, so only the affected leg actually re-fetches
+  }
+
+  // A dragged leg-stop marker gets pinned as a real via stop at the drop point, inserted at the
+  // spot in the via list matching the segment it came from — not just appended at the end — so
+  // the route order stays correct.
+  async function handleLegStopDrop(wp, lat, lon){
+    setStatus('Locating dropped stop…');
+    let label = 'Dropped stop';
+    try {
+      const rg = await reverseGeocode(lat, lon);
+      label = rg.name;
+    } catch(e){ /* keep the generic label — still usable as a via stop */ }
+    const insertIndex = (wp.segIdx !== undefined) ? wp.segIdx : viaRows.length;
+    addViaRow({ lat, lon, label }, insertIndex);
+    setStatus(`${label} pinned as a via stop — recalculating…`);
+    viaContainer.scrollIntoView({ behavior:'smooth', block:'center' });
+    run();
   }
 
   /* ---------- Save / load a route as a file ---------- */
@@ -2209,7 +2514,8 @@
         efficiency: efficiencyInput.value,
         currency: currencyInput.value,
         range: rangeInput.value
-      }
+      },
+      amenityFilters: amenityFilterState()
     };
   }
 
@@ -2255,6 +2561,13 @@
     if (data.prefHours) hoursInput.value = data.prefHours;
     if (data.radiusMeters) radiusInput.value = data.radiusMeters;
     if (data.restMinutes !== undefined) restInput.value = data.restMinutes;
+
+    if (data.amenityFilters){
+      $('filterHotels').checked = !!data.amenityFilters.hotels;
+      $('filterCampsites').checked = !!data.amenityFilters.campsites;
+      $('filterParking').checked = !!data.amenityFilters.parking;
+      $('filterPetFriendly').checked = !!data.amenityFilters.petOnly;
+    }
 
     if (data.unit && data.unit !== unitState){
       unitSwitch.click(); // reuses the existing unit-change wiring (labels, conversions) rather than duplicating it
