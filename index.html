@@ -1,0 +1,2236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waypoint — Trip Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root{
+    --paper:#FBFAF6;
+    --grid:#D9DCD3;
+    --grid-strong:#B9BFB2;
+    --ink:#1E2A22;
+    --ink-soft:#5C6B60;
+    --band:#153D2B;
+    --band-soft:#1E5238;
+    --amber:#DD9A2E;
+    --amber-soft:#F6E4BE;
+    --road:#3B6E8F;
+    --danger:#B5493A;
+    --white:#fff;
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  ::selection{background:var(--amber-soft);}
+
+  /* ---------- Top band ---------- */
+  .topband{
+    background:var(--band);
+    color:#EFEBDD;
+    padding:18px 28px 0 28px;
+  }
+  .brand-row{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-bottom:14px;
+  }
+  .brand{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:700;
+    font-size:20px;
+    letter-spacing:0.01em;
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+  }
+  .brand small{
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:400;
+    font-size:11px;
+    color:var(--amber-soft);
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    opacity:0.75;
+  }
+
+  /* Sheet tabs */
+  .tabs{
+    display:flex;
+    gap:2px;
+  }
+  .tab{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    padding:9px 18px 10px 18px;
+    background:var(--band-soft);
+    color:#C7D3C9;
+    border:none;
+    border-top-left-radius:5px;
+    border-top-right-radius:5px;
+    cursor:pointer;
+    letter-spacing:0.02em;
+  }
+  .tab.active{
+    background:var(--paper);
+    color:var(--ink);
+    font-weight:600;
+  }
+  .tab:not(.active):hover{background:#265842;}
+  .tab .dot{
+    display:inline-block;
+    width:6px;height:6px;
+    border-radius:50%;
+    background:var(--amber);
+    margin-right:7px;
+    position:relative;
+    top:-1px;
+  }
+  .tab.disabled{opacity:0.55;cursor:default;}
+  .tab-label{outline:none;border-radius:2px;padding:0 2px;}
+  .tab-label[contenteditable="true"]{
+    cursor:text;
+    box-shadow:0 0 0 2px var(--amber);
+    background:rgba(255,255,255,0.35);
+  }
+
+  /* ---------- Sheet body ---------- */
+  .sheet-wrap{
+    max-width:1180px;
+    margin:0 auto;
+    padding:26px 28px 60px 28px;
+  }
+
+  .input-grid{
+    display:grid;
+    grid-template-columns:34px 150px 1fr;
+    border:1px solid var(--grid-strong);
+    border-bottom:none;
+    background:var(--white);
+    margin-bottom:0;
+  }
+  .rowhead{
+    background:#F2F1EA;
+    border-right:1px solid var(--grid);
+    border-bottom:1px solid var(--grid);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .label-cell{
+    border-right:1px solid var(--grid);
+    border-bottom:1px solid var(--grid);
+    display:flex;
+    align-items:center;
+    padding:0 12px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    color:var(--ink-soft);
+    background:#F8F7F2;
+  }
+  .input-cell{
+    border-bottom:1px solid var(--grid);
+    position:relative;
+  }
+  .input-cell input, .input-cell select{
+    width:100%;
+    height:100%;
+    border:none;
+    outline:none;
+    background:transparent;
+    padding:9px 12px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13.5px;
+    color:var(--ink);
+  }
+  .input-cell input:focus, .input-cell select:focus{
+    box-shadow:inset 0 0 0 2px var(--amber);
+    background:var(--amber-soft);
+  }
+  .input-cell.active-cell{box-shadow:inset 0 0 0 2px var(--road);}
+  .input-cell select{cursor:pointer;}
+
+  .unit-cell{display:flex;align-items:center;padding:0 12px;}
+
+  .topband-right{
+    display:flex;
+    align-items:center;
+    gap:16px;
+  }
+  .unit-switch{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    background:none;
+    border:none;
+    cursor:pointer;
+    padding:2px;
+  }
+  .unit-switch-label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:#8FA298;
+    letter-spacing:0.02em;
+    transition:color 0.15s ease;
+  }
+  .unit-switch[aria-checked="false"] .unit-switch-label[data-unit="km"],
+  .unit-switch[aria-checked="true"] .unit-switch-label[data-unit="mi"]{
+    color:#EFEBDD;
+    font-weight:600;
+  }
+  .unit-switch-track{
+    width:34px;height:19px;
+    border-radius:11px;
+    background:rgba(255,255,255,0.14);
+    border:1px solid rgba(255,255,255,0.22);
+    position:relative;
+    flex-shrink:0;
+  }
+  .unit-switch-thumb{
+    position:absolute;
+    top:2px;left:2px;
+    width:13px;height:13px;
+    border-radius:50%;
+    background:#EFEBDD;
+    transition:transform 0.15s ease, background 0.15s ease;
+  }
+  .unit-switch[aria-checked="true"] .unit-switch-thumb{
+    transform:translateX(15px);
+    background:var(--amber);
+  }
+  .unit-switch:hover .unit-switch-track{background:rgba(255,255,255,0.22);}
+
+  .via-rowhead{background:#F2EDF6;color:#7A4FA3;font-weight:600;}
+  .via-remove-btn{
+    position:absolute;
+    top:50%;
+    right:8px;
+    transform:translateY(-50%);
+    width:20px;height:20px;
+    border-radius:50%;
+    border:1px solid var(--grid-strong);
+    background:var(--white);
+    color:var(--ink-soft);
+    font-size:13px;
+    line-height:1;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:3;
+  }
+  .via-remove-btn:hover{background:#F6E4E1;color:var(--danger);border-color:var(--danger);}
+  .add-via-cell{padding:0 12px;display:flex;align-items:center;}
+  #addViaBtn{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    color:#7A4FA3;
+    background:#F2EDF6;
+    border:1px dashed #C6A9DA;
+    padding:7px 14px;
+    border-radius:20px;
+    cursor:pointer;
+  }
+  #addViaBtn:hover{background:#E9DFF2;}
+
+  /* ---------- Autocomplete ---------- */
+  .autocomplete-wrap{position:relative;height:100%;}
+  .ac-list{
+    position:absolute;
+    top:calc(100% - 1px);
+    left:0;right:0;
+    background:var(--white);
+    border:1px solid var(--grid-strong);
+    box-shadow:0 6px 14px rgba(21,61,43,0.14);
+    z-index:20;
+    max-height:220px;
+    overflow-y:auto;
+    display:none;
+  }
+  .ac-list.open{display:block;}
+  .ac-item{
+    padding:8px 12px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    color:var(--ink);
+    cursor:pointer;
+    border-bottom:1px solid var(--grid);
+    display:flex;
+    flex-direction:column;
+    gap:1px;
+  }
+  .ac-item .ac-main{font-weight:600;}
+  .ac-item .ac-sub{font-family:'Inter',sans-serif;font-size:11px;color:var(--ink-soft);}
+  .ac-item:last-child{border-bottom:none;}
+  .ac-item:hover,.ac-item.hl{background:var(--amber-soft);}
+  .ac-empty{
+    padding:8px 12px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+
+  .action-row{
+    display:grid;
+    grid-template-columns:34px 150px 1fr;
+    border:1px solid var(--grid-strong);
+    border-bottom:1px solid var(--grid-strong);
+    background:var(--white);
+    margin-bottom:22px;
+  }
+  .action-row .rowhead{border-bottom:none;}
+  .action-cell{
+    padding:12px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+    border-left:1px solid var(--grid);
+  }
+  #calcBtn{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:13.5px;
+    background:var(--band);
+    color:#EFEBDD;
+    border:none;
+    padding:10px 20px;
+    border-radius:var(--radius);
+    cursor:pointer;
+    letter-spacing:0.01em;
+  }
+  #calcBtn:hover{background:var(--band-soft);}
+  #calcBtn:disabled{opacity:0.5;cursor:default;}
+  .secondary-btn{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:13px;
+    background:var(--white);
+    color:var(--band);
+    border:1px solid var(--band);
+    padding:9px 16px;
+    border-radius:var(--radius);
+    cursor:pointer;
+  }
+  .secondary-btn:hover{background:#EEF3EF;}
+  .status-text{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    color:var(--ink-soft);
+  }
+  .status-text.err{color:var(--danger);}
+  .status-text.ok{color:#2C6E49;}
+
+  /* ---------- Results grid ---------- */
+  .results-head{
+    display:grid;
+    grid-template-columns:64px 1.15fr 1.15fr 95px 110px 130px 1.6fr;
+    background:var(--band);
+    color:#EFEBDD;
+  }
+  .results-head div{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    padding:10px 12px;
+    border-right:1px solid rgba(255,255,255,0.12);
+  }
+  .results-body{
+    border:1px solid var(--grid-strong);
+    border-top:none;
+    background:var(--white);
+  }
+  .leg-row{
+    display:grid;
+    grid-template-columns:64px 1.15fr 1.15fr 95px 110px 130px 1.6fr;
+    border-bottom:1px solid var(--grid);
+  }
+  .leg-row:nth-child(even){background:#F8F7F2;}
+  .leg-row > div{
+    padding:12px;
+    border-right:1px solid var(--grid);
+    font-size:13px;
+  }
+  .leg-num{
+    font-family:'IBM Plex Mono',monospace;
+    color:var(--ink-soft);
+    background:var(--amber-soft);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:600;
+    font-size:13px;
+  }
+  .leg-place{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:13.5px;
+  }
+  .leg-place .sub{
+    display:block;
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:400;
+    font-size:11px;
+    color:var(--ink-soft);
+    margin-top:2px;
+  }
+  .leg-dist,.leg-time{
+    font-family:'IBM Plex Mono',monospace;
+    color:var(--ink);
+    display:flex;
+    align-items:center;
+  }
+  .rest-cell{
+    font-family:'IBM Plex Mono',monospace;
+    color:var(--ink);
+    font-size:13px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:2px;
+  }
+  .rest-cell .sub{
+    font-family:'Inter',sans-serif;
+    font-weight:400;
+    font-size:10.5px;
+    color:var(--ink-soft);
+  }
+  .towns-cell{display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start;}
+  .town-chip{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;
+    background:#EEF3EF;
+    color:#2C4A38;
+    border:1px solid #D3DED7;
+    padding:3px 8px;
+    border-radius:20px;
+    white-space:nowrap;
+    cursor:pointer;
+  }
+  .town-chip:hover, .town-chip:focus{
+    background:#DCEBE1;
+    border-color:#2C6E49;
+    outline:none;
+  }
+  .town-chip.chip-active{
+    background:var(--band);
+    color:#EFEBDD;
+    border-color:var(--band);
+  }
+  .town-chip.chip-active .dist{color:#C7D3C9;}
+  .town-chip .dist{color:var(--ink-soft);}
+  .place-tag{
+    font-family:'Inter',sans-serif;
+    font-size:9.5px;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    color:#6E8A78;
+    background:#DCE9E0;
+    padding:1px 5px;
+    border-radius:8px;
+    margin-left:4px;
+  }
+  .towns-loading{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+  .towns-loading.err-text{color:var(--danger);}
+
+  .totals-row{
+    display:grid;
+    grid-template-columns:64px 1.15fr 1.15fr 95px 110px 130px 1.6fr;
+    border:1px solid var(--grid-strong);
+    border-top:none;
+    background:#F2F1EA;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    font-weight:600;
+  }
+  .totals-row > div{padding:10px 12px;border-right:1px solid var(--grid);}
+
+  .file-protocol-notice{
+    border:1px solid #E0B84A;
+    background:#FBF3DA;
+    color:#5C4A12;
+    padding:12px 14px;
+    border-radius:var(--radius);
+    font-size:12.5px;
+    line-height:1.6;
+    margin-bottom:18px;
+  }
+  .file-protocol-notice strong{display:block;margin-bottom:3px;font-family:'Space Grotesk',sans-serif;font-size:13.5px;}
+  .file-protocol-notice code{
+    font-family:'IBM Plex Mono',monospace;
+    background:#F0E2B8;
+    padding:1px 5px;
+    border-radius:3px;
+    font-size:11.5px;
+  }
+
+  .empty-state{
+    border:1px dashed var(--grid-strong);
+    border-top:none;
+    padding:34px 20px;
+    text-align:center;
+    color:var(--ink-soft);
+    font-size:13px;
+    background:var(--white);
+  }
+  .empty-state .big{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:15px;
+    color:var(--ink);
+    display:block;
+    margin-bottom:6px;
+  }
+
+  .map-section{
+    margin-top:22px;
+  }
+  .map-title-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:#F2F1EA;
+    border:1px solid var(--grid-strong);
+    border-bottom:none;
+    padding:9px 14px;
+  }
+  .map-title-row .map-title{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+  }
+  .map-title-row .map-legend{
+    display:flex;
+    gap:14px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+  }
+  .map-legend span{display:inline-flex;align-items:center;gap:5px;}
+  .legend-dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
+  .map-outer{
+    position:relative;
+    border:1px solid var(--grid-strong);
+    height:420px;
+    background:var(--white);
+  }
+  #mapCanvas{width:100%;height:100%;}
+  .map-placeholder{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    gap:6px;
+    background:var(--white);
+    color:var(--ink-soft);
+    font-size:13px;
+    text-align:center;
+    z-index:5;
+    pointer-events:none;
+  }
+  .map-placeholder .big{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:15px;
+    color:var(--ink);
+  }
+  .map-placeholder.hidden{display:none;}
+  .leaflet-popup-content{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+  }
+  .leaflet-popup-content .pop-title{font-weight:600;font-family:'Space Grotesk',sans-serif;font-size:13px;}
+  .popup-add-btn{
+    display:block;
+    margin-top:7px;
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:11.5px;
+    background:var(--band);
+    color:#EFEBDD;
+    border:none;
+    padding:5px 10px;
+    border-radius:3px;
+    cursor:pointer;
+  }
+  .popup-add-btn:hover{background:var(--band-soft);}
+
+  .fuel-section{margin-top:22px;}
+  .fuel-outer{
+    border:1px solid var(--grid-strong);
+    background:var(--white);
+    padding:16px;
+  }
+  .fuel-placeholder{
+    color:var(--ink-soft);
+    font-size:13px;
+    padding:10px 2px;
+  }
+  .fuel-controls{
+    display:flex;
+    flex-wrap:wrap;
+    gap:20px;
+    margin-bottom:16px;
+    padding-bottom:16px;
+    border-bottom:1px dashed var(--grid);
+  }
+  .fuel-control{display:flex;flex-direction:column;gap:5px;}
+  .fuel-control label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    color:var(--ink-soft);
+  }
+  .fuel-control select, .fuel-control input{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+    border:1px solid var(--grid-strong);
+    border-radius:3px;
+    padding:6px 10px;
+    background:var(--white);
+    color:var(--ink);
+    width:150px;
+  }
+  .fuel-control select:focus, .fuel-control input:focus{
+    outline:none;
+    box-shadow:0 0 0 2px var(--amber);
+  }
+  .fuel-row{
+    display:grid;
+    grid-template-columns:1.4fr 1fr 100px 130px 130px;
+    align-items:center;
+    gap:10px;
+    padding:8px 0;
+    border-bottom:1px solid var(--grid);
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+  }
+  .fuel-row.head{
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    color:var(--ink-soft);
+    font-family:'IBM Plex Mono',monospace;
+    border-bottom:1px solid var(--grid-strong);
+  }
+  .fuel-row .country-name{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:13.5px;color:var(--ink);}
+  .fuel-row input.price-input{
+    width:90px;
+    padding:5px 8px;
+    border:1px solid var(--grid-strong);
+    border-radius:3px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+  }
+  .fuel-row input.price-input:focus{outline:none;box-shadow:0 0 0 2px var(--amber);}
+  .fuel-subtotal{font-weight:600;}
+  .fuel-total-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    padding-top:14px;
+    margin-top:6px;
+  }
+  .fuel-total-label{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-soft);}
+  .fuel-total-value{font-family:'Space Grotesk',sans-serif;font-size:24px;font-weight:700;color:var(--band);}
+  .fuel-range-controls{
+    padding-top:16px;
+    margin-top:2px;
+    border-top:1px dashed var(--grid);
+  }
+  .fuel-range-btn-wrap, .fuel-range-status-wrap{justify-content:flex-end;}
+  #findStationsBtn{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:12.5px;
+    background:var(--band);
+    color:#EFEBDD;
+    border:none;
+    padding:9px 16px;
+    border-radius:var(--radius);
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  #findStationsBtn:hover{background:var(--band-soft);}
+  #findStationsBtn:disabled{opacity:0.5;cursor:default;}
+  #stationList{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    margin-top:14px;
+  }
+  .station-group{display:flex;flex-direction:column;gap:6px;}
+  .station-group-label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    color:var(--ink-soft);
+  }
+  .station-group-chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .station-chip{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;
+    background:#FBEFE3;
+    color:#7A4118;
+    border:1px solid #EAD2B4;
+    padding:4px 10px;
+    border-radius:20px;
+    white-space:nowrap;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:5px;
+  }
+  .station-chip:hover, .station-chip:focus{background:#F5E1CB;outline:none;}
+  .station-chip .dist{color:#96703F;}
+  .station-chip.chip-active{background:#B5493A;color:#fff;border-color:#B5493A;}
+  .station-chip.chip-active .dist{color:#F3D3CC;}
+  .station-chip .miss-icon{color:var(--danger);}
+
+  .fuel-footnote{
+    margin-top:10px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    line-height:1.6;
+  }
+  @media (max-width:640px){
+    .fuel-row{grid-template-columns:1fr 1fr;}
+    .fuel-row.head{display:none;}
+    .fuel-row > div{padding:2px 0;}
+  }
+
+  .footnote{
+    margin-top:18px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    line-height:1.6;
+  }
+  .footnote a{color:var(--road);}
+
+  .single-dest-panel{
+    border:1px dashed var(--grid-strong);
+    padding:40px 30px;
+    text-align:center;
+    background:var(--white);
+  }
+  .single-dest-panel .big{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:17px;
+    margin-bottom:8px;
+    display:block;
+  }
+  .single-dest-panel p{
+    color:var(--ink-soft);
+    font-size:13px;
+    max-width:440px;
+    margin:0 auto;
+    line-height:1.6;
+  }
+
+  @media (max-width:820px){
+    .results-head, .leg-row, .totals-row{grid-template-columns:44px 1fr 1fr;}
+    .results-head div:nth-child(4),.results-head div:nth-child(5),.results-head div:nth-child(6),.results-head div:nth-child(7),
+    .leg-row > div:nth-child(4),.leg-row > div:nth-child(5),.leg-row > div:nth-child(6),.leg-row > div:nth-child(7),
+    .totals-row > div:nth-child(4),.totals-row > div:nth-child(5),.totals-row > div:nth-child(6),.totals-row > div:nth-child(7){
+      grid-column:1/-1;border-top:1px dashed var(--grid);
+    }
+    .input-grid,.action-row{grid-template-columns:28px 120px 1fr;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topband">
+  <div class="brand-row">
+    <div class="brand">Waypoint <small>trip sheet</small></div>
+    <div class="topband-right">
+      <button type="button" class="unit-switch" id="unitSwitch" role="switch" aria-checked="true" aria-label="Toggle units between km and mi">
+        <span class="unit-switch-label" data-unit="km">km</span>
+        <span class="unit-switch-track"><span class="unit-switch-thumb"></span></span>
+        <span class="unit-switch-label" data-unit="mi">mi</span>
+      </button>
+    </div>
+  </div>
+  <div class="tabs">
+    <button class="tab active" id="tabRoadtrip" type="button" title="Double-click the name to rename this tab">
+      <span class="dot"></span><span class="tab-label" id="tabRoadtripLabel" spellcheck="false">Road Trip</span>
+    </button>
+    <button class="tab disabled" id="tabSingle" title="Coming after the road-trip mode is finished">Single Destination</button>
+  </div>
+</div>
+
+<div class="sheet-wrap">
+
+  <div id="roadtripPanel">
+
+    <div class="file-protocol-notice" id="fileProtocolNotice" style="display:none;">
+      <strong>Nearby towns and fill-up stations won't work opened this way.</strong>
+      This file is running directly from disk (<code>file://</code>), and the free map-data service behind those two features (Overpass) blocks that. Routing, place names, distances, and the fuel cost estimate are unaffected. To get the full tool: use it here in the chat, or serve the file locally — from its folder, run <code>python -m http.server 8000</code> and open <code>http://localhost:8000/</code> plus the filename.
+    </div>
+
+    <div class="input-grid">
+      <div class="rowhead">1</div>
+      <div class="label-cell">Start (A1)</div>
+      <div class="input-cell"><div class="autocomplete-wrap">
+        <input type="text" id="startInput" placeholder="e.g. Calais, France" autocomplete="off">
+        <div class="ac-list" id="startAcList"></div>
+      </div></div>
+
+      <div id="viaContainer" style="display:contents;"></div>
+
+      <div class="rowhead">+</div>
+      <div class="label-cell">Via stop</div>
+      <div class="input-cell add-via-cell">
+        <button type="button" id="addViaBtn">+ Add a stop between start and finish</button>
+      </div>
+
+      <div class="rowhead">2</div>
+      <div class="label-cell">Finish (A2)</div>
+      <div class="input-cell"><div class="autocomplete-wrap">
+        <input type="text" id="endInput" placeholder="e.g. Carcassonne, France" autocomplete="off">
+        <div class="ac-list" id="endAcList"></div>
+      </div></div>
+
+      <div class="rowhead">3</div>
+      <div class="label-cell">Preferred leg (A3)</div>
+      <div class="input-cell">
+        <select id="hoursInput">
+          <option value="2">Up to 2 hours</option>
+          <option value="3">Up to 3 hours</option>
+          <option value="4" selected>Up to 4 hours</option>
+          <option value="4.5">Up to 4.5 hours</option>
+          <option value="5">Up to 5 hours</option>
+          <option value="6">Up to 6 hours</option>
+          <option value="7">Up to 7 hours</option>
+          <option value="8">Up to 8 hours</option>
+        </select>
+      </div>
+
+      <div class="rowhead">4</div>
+      <div class="label-cell">Nearby search (A4)</div>
+      <div class="input-cell">
+        <select id="radiusInput">
+          <option value="10000" data-km="10">10 km radius</option>
+          <option value="25000" data-km="25" selected>25 km radius</option>
+          <option value="40000" data-km="40">40 km radius</option>
+          <option value="60000" data-km="60">60 km radius</option>
+        </select>
+      </div>
+
+      <div class="rowhead">5</div>
+      <div class="label-cell">Rest breaks (A5)</div>
+      <div class="input-cell">
+        <select id="restInput">
+          <option value="0">No rest breaks</option>
+          <option value="15">15 min during each leg</option>
+          <option value="30" selected>30 min during each leg</option>
+          <option value="45">45 min during each leg</option>
+          <option value="60">1 hour during each leg</option>
+        </select>
+      </div>
+    </div>
+    <div class="action-row">
+      <div class="rowhead">6</div>
+      <div class="label-cell">Run</div>
+      <div class="action-cell">
+        <button id="calcBtn">Calculate route</button>
+        <span class="status-text" id="statusText">Enter a start and finish, then calculate.</span>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <div class="rowhead">7</div>
+      <div class="label-cell">Save / load</div>
+      <div class="action-cell">
+        <button id="saveRouteBtn" class="secondary-btn">⬇ Save route</button>
+        <button id="loadRouteBtn" class="secondary-btn">⬆ Load route</button>
+        <input type="file" id="loadRouteFile" accept=".json,application/json" style="display:none;">
+        <span class="status-text" id="saveLoadStatus">Save this trip as a file, or load one you saved before.</span>
+      </div>
+    </div>
+
+    <div id="resultsArea">
+      <div class="empty-state">
+        <span class="big">No route yet</span>
+        The grid below fills in once a route is calculated — one row per leg, each cut to your preferred journey time, with nearby towns for wherever you land.
+      </div>
+    </div>
+
+    <div class="map-section">
+      <div class="map-title-row">
+        <span class="map-title">Route map</span>
+        <span class="map-legend">
+          <span><span class="legend-dot" style="background:#153D2B;"></span>start</span>
+          <span><span class="legend-dot" style="background:#7A4FA3;"></span>via stop</span>
+          <span><span class="legend-dot" style="background:#DD9A2E;"></span>leg stop</span>
+          <span><span class="legend-dot" style="background:#3B6E8F;"></span>finish</span>
+          <span><span class="legend-dot" style="background:#1B8A7A;"></span>nearby town</span>
+          <span><span class="legend-dot" style="background:#B5493A;"></span>fill-up stop</span>
+        </span>
+      </div>
+      <div class="map-outer">
+        <div id="mapCanvas"></div>
+        <div class="map-placeholder" id="mapPlaceholder">
+          <span class="big">Map appears here</span>
+          Calculate a route to see it plotted, with a pin at the start, each leg stop, and the finish.
+        </div>
+      </div>
+    </div>
+
+    <div class="fuel-section">
+      <div class="map-title-row">
+        <span class="map-title">Fuel cost estimate</span>
+      </div>
+      <div class="fuel-outer" id="fuelOuter">
+        <div class="fuel-placeholder" id="fuelPlaceholder">
+          Calculate a route first — this fills in with fuel prices detected for each country you'll cross.
+        </div>
+        <div class="fuel-controls" id="fuelControls" style="display:none;">
+          <div class="fuel-control">
+            <label for="fuelTypeInput">Vehicle</label>
+            <select id="fuelTypeInput">
+              <option value="petrol">Petrol</option>
+              <option value="diesel">Diesel</option>
+              <option value="electric">Electric</option>
+            </select>
+          </div>
+          <div class="fuel-control">
+            <label for="efficiencyInput" id="efficiencyLabel">Efficiency (L/100km)</label>
+            <input type="number" id="efficiencyInput" value="7" min="0" step="0.1">
+          </div>
+          <div class="fuel-control">
+            <label for="currencyInput">Currency</label>
+            <select id="currencyInput">
+              <option value="GBP">£ GBP</option>
+              <option value="EUR">€ EUR</option>
+              <option value="USD">$ USD</option>
+            </select>
+          </div>
+        </div>
+        <div id="fuelTable"></div>
+
+        <div class="fuel-controls fuel-range-controls" id="fuelRangeControls" style="display:none;">
+          <div class="fuel-control">
+            <label for="rangeInput" id="rangeLabel">Range between fill-ups (km)</label>
+            <input type="number" id="rangeInput" value="500" min="0" step="10">
+          </div>
+          <div class="fuel-control fuel-range-btn-wrap">
+            <label>&nbsp;</label>
+            <button type="button" id="findStationsBtn">Find fuel stops along route</button>
+          </div>
+          <div class="fuel-control fuel-range-status-wrap">
+            <label>&nbsp;</label>
+            <span class="status-text" id="stationStatus"></span>
+          </div>
+        </div>
+        <div id="stationList"></div>
+      </div>
+      <div class="fuel-footnote">
+        Prices are rough recent averages by country, not a live feed — edit any row to match prices you know are current. Electric charging cost is a single rate since roadside prices vary far more than fuel does. Fill-up stops search OpenStreetMap for up to 3 fuel or charging options within 20 miles of each calculated point along your route — always double-check a station is open/compatible before relying on it.
+      </div>
+    </div>
+
+    <div class="footnote">
+      Routing via OSRM · Geocoding &amp; nearby towns via OpenStreetMap Nominatim and Overpass. Driving times are engine estimates (no traffic, stops or borders factored in) — treat them as a planning starting point.
+    </div>
+  </div>
+
+  <div id="singlePanel" style="display:none;">
+    <div class="single-dest-panel">
+      <span class="big">Single-destination mode</span>
+      <p>Building the road-trip splitter first. Once that's solid, this tab will handle a single base with day-trip radius suggestions.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const startInput = $('startInput'), endInput = $('endInput'), hoursInput = $('hoursInput');
+  const calcBtn = $('calcBtn'), statusText = $('statusText'), resultsArea = $('resultsArea');
+
+  const isFileProtocol = window.location.protocol === 'file:';
+  if (isFileProtocol) $('fileProtocolNotice').style.display = 'block';
+
+  const NOMINATIM = 'https://nominatim.openstreetmap.org';
+  const OSRM = 'https://router.project-osrm.org';
+
+  const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+  function setStatus(msg, kind){
+    statusText.textContent = msg;
+    statusText.className = 'status-text' + (kind ? ' '+kind : '');
+  }
+
+  function fmtHours(seconds){
+    const h = seconds/3600;
+    if (h < 1) return Math.round(seconds/60) + ' min';
+    const whole = Math.floor(h);
+    const mins = Math.round((h-whole)*60);
+    return mins ? (whole+'h '+mins+'m') : (whole+'h');
+  }
+  function fmtDist(meters){
+    if (unitState === 'mi'){
+      return (meters/1000*0.621371).toFixed(0) + ' mi';
+    }
+    return Math.round(meters/1000) + ' km';
+  }
+  function townDistLabel(km){
+    if (unitState === 'mi') return (km*0.621371).toFixed(0) + 'mi';
+    return km.toFixed(0) + 'km';
+  }
+
+  function haversine(lat1,lon1,lat2,lon2){
+    const R=6371, toRad=d=>d*Math.PI/180;
+    const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+    const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  }
+
+  async function geocode(query){
+    const url = `${NOMINATIM}/search?q=${encodeURIComponent(query)}&format=jsonv2&limit=1&addressdetails=1`;
+    const res = await fetch(url, {headers:{'Accept':'application/json'}});
+    if (!res.ok) throw new Error('Geocoding service unavailable');
+    const data = await res.json();
+    if (!data.length) throw new Error(`Couldn't find "${query}" — try a more specific name`);
+    const a = data[0].address || {};
+    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), label: data[0].display_name, countryCode:(a.country_code||'').toLowerCase(), countryName:a.country||'' };
+  }
+
+  const reverseGeoCache = new Map(); // "lat,lon" -> {name,countryCode,countryName}
+
+  async function reverseGeocode(lat, lon){
+    const key = lat.toFixed(5)+','+lon.toFixed(5);
+    if (reverseGeoCache.has(key)) return reverseGeoCache.get(key);
+    const url = `${NOMINATIM}/reverse?lat=${lat}&lon=${lon}&format=jsonv2&zoom=12&addressdetails=1`;
+    const res = await fetch(url, {headers:{'Accept':'application/json'}});
+    if (!res.ok) throw new Error('reverse geocode failed');
+    const data = await res.json();
+    const a = data.address || {};
+    const name = a.town || a.city || a.village || a.municipality || a.county || (data.display_name||'').split(',')[0];
+    const result = { name: name || 'Unnamed area', countryCode:(a.country_code||'').toLowerCase(), countryName:a.country||'' };
+    reverseGeoCache.set(key, result);
+    return result;
+  }
+
+  const routeCache = new Map(); // "lat,lon|lat,lon" -> route — lets re-adding a via reuse legs that haven't changed
+  function coordKey(p){ return p.lat.toFixed(5)+','+p.lon.toFixed(5); }
+
+  async function getRoute(a, b){
+    const key = coordKey(a) + '|' + coordKey(b);
+    if (routeCache.has(key)) return routeCache.get(key);
+    const url = `${OSRM}/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson&annotations=duration,distance`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Routing service unavailable');
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.routes || !data.routes.length) throw new Error('No driving route found between those points');
+    const route = data.routes[0];
+    routeCache.set(key, route);
+    return route;
+  }
+
+  const OVERPASS_ENDPOINTS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.openstreetmap.ru/api/interpreter'
+  ];
+
+  async function overpassFetch(url){
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    return res.json();
+  }
+
+  function parseOverpassTowns(data, lat, lon){
+    const seen = new Set();
+    return (data.elements||[])
+      .filter(el => el.tags && el.tags.name && typeof el.lat === 'number')
+      .map(el => ({
+        name: el.tags.name,
+        place: el.tags.place,
+        lat: el.lat, lon: el.lon,
+        dist: haversine(lat, lon, el.lat, el.lon)
+      }))
+      .filter(t => {
+        const key = t.name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((x,y)=>x.dist-y.dist)
+      .slice(0,5);
+  }
+
+  async function overpassQuery(query){
+    if (isFileProtocol){
+      throw new Error('needs the page served over http(s) — see the note above');
+    }
+    const encodedQuery = encodeURIComponent(query);
+    let lastErr = null;
+
+    // direct GET requests to each mirror (GET avoids the body/content-type quirks that can trip up some Overpass fronts)
+    for (const endpoint of OVERPASS_ENDPOINTS){
+      try {
+        return await overpassFetch(endpoint + '?data=' + encodedQuery);
+      } catch(e){
+        lastErr = e;
+        continue;
+      }
+    }
+
+    // last resort: route through a CORS proxy — helps when the page is opened as a local file
+    // (file:// origin), which some Overpass mirrors reject even though they otherwise support CORS.
+    // Try a couple of different proxies since any single one can itself reject a null origin, rate-limit, or be down.
+    const targetUrl = OVERPASS_ENDPOINTS[0] + '?data=' + encodedQuery;
+    const proxies = [
+      'https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl),
+      'https://corsproxy.io/?url=' + encodeURIComponent(targetUrl)
+    ];
+    for (const proxied of proxies){
+      try {
+        return await overpassFetch(proxied);
+      } catch(e){
+        lastErr = e;
+      }
+    }
+    // every endpoint failed — surface as a distinct error rather than a silent empty result
+    throw new Error('search unavailable — ' + (lastErr ? lastErr.message : 'unknown error'));
+  }
+
+  const townsGeoCache = new Map(); // "lat,lon@radius" -> towns array
+
+  async function nearbyTowns(lat, lon, radiusMeters){
+    const key = lat.toFixed(5)+','+lon.toFixed(5)+'@'+radiusMeters;
+    if (townsGeoCache.has(key)) return townsGeoCache.get(key);
+    const query = `[out:json][timeout:20];node(around:${radiusMeters},${lat},${lon})[place~"^(city|town|suburb)$"];out body 20;`;
+    const data = await overpassQuery(query);
+    const towns = parseOverpassTowns(data, lat, lon);
+    townsGeoCache.set(key, towns);
+    return towns;
+  }
+
+  function buildCumulative(route){
+    // route.legs[0].annotation.duration/distance is per-coordinate-pair; geometry.coordinates has N points, arrays have N-1 entries
+    const leg = route.legs[0];
+    const durations = (leg.annotation && leg.annotation.duration) || [];
+    const distances = (leg.annotation && leg.annotation.distance) || [];
+    const coords = route.geometry.coordinates; // [lon,lat]
+    const cumDur = [0], cumDist = [0];
+    for (let i=0;i<durations.length;i++) cumDur.push(cumDur[i]+durations[i]);
+    for (let i=0;i<distances.length;i++) cumDist.push(cumDist[i]+(distances[i]||0));
+    return { coords, cumDur, cumDist };
+  }
+
+  function coordAtTime(built, targetSeconds){
+    const { coords, cumDur, cumDist } = built;
+    let idx = 0;
+    for (let i=0;i<cumDur.length;i++){
+      if (cumDur[i] <= targetSeconds) idx = i; else break;
+    }
+    const [lon, lat] = coords[idx];
+    return { lat, lon, idx, dur: cumDur[idx], dist: cumDist[idx] };
+  }
+
+  function coordAtDistance(built, targetMeters){
+    const { coords, cumDur, cumDist } = built;
+    let idx = 0;
+    for (let i=0;i<cumDist.length;i++){
+      if (cumDist[i] <= targetMeters) idx = i; else break;
+    }
+    const [lon, lat] = coords[idx];
+    return { lat, lon, idx, dur: cumDur[idx], dist: cumDist[idx] };
+  }
+
+  function renderTownsPlaceholder(){
+    return '<span class="towns-loading">looking nearby…</span>';
+  }
+
+  const placeAbbrev = { city:'city', town:'town', suburb:'sub' };
+  function townsHtml(towns){
+    if (towns === 'ERROR') return `<span class="towns-loading err-text">${isFileProtocol ? 'unavailable — see notice above' : 'nearby-town search unavailable right now'}</span>`;
+    if (!towns || !towns.length) return '<span class="towns-loading">no nearby towns found within radius</span>';
+    return towns.map(t => {
+      const tag = placeAbbrev[t.place] ? `<span class="place-tag">${placeAbbrev[t.place]}</span>` : '';
+      return `<span class="town-chip" tabindex="0" role="button" data-lat="${t.lat}" data-lon="${t.lon}" data-name="${t.name.replace(/"/g,'&quot;')}" title="Show on map">${t.name}${tag} <span class="dist">${townDistLabel(t.dist)}</span></span>`;
+    }).join('');
+  }
+
+  async function run(){
+    const startQ = startInput.value.trim();
+    const endQ = endInput.value.trim();
+    const prefHours = parseFloat(hoursInput.value);
+    const radiusMeters = parseInt($('radiusInput').value, 10);
+    const restMinutes = parseInt($('restInput').value, 10);
+
+    if (!startQ || !endQ){
+      setStatus('Enter both a start and a finish location.', 'err');
+      return;
+    }
+
+    const viaQueries = viaRows
+      .map(v => ({ text: v.input.value.trim(), coords: v.acState.coords }))
+      .filter(v => v.text.length);
+
+    calcBtn.disabled = true;
+    townsCacheByIndex = {};
+    lastTotals = null;
+    lastFuelLegs = [];
+    lastRouteSegments = [];
+    fuelControls.style.display = 'none';
+    fuelPlaceholder.style.display = 'block';
+    fuelTable.innerHTML = '';
+    fuelRangeControls.style.display = 'none';
+    stationList.innerHTML = '';
+    stationStatus.textContent = '';
+
+    try {
+      async function resolve(text, cached, label){
+        if (cached) return { lat:cached.lat, lon:cached.lon, label: label || cached.label, countryCode:cached.countryCode, countryName:cached.countryName };
+        setStatus('Locating ' + text + '…');
+        const g = await geocode(text);
+        await sleep(1100);
+        return { lat:g.lat, lon:g.lon, label: label || text, countryCode:g.countryCode, countryName:g.countryName };
+      }
+
+      const startPt = await resolve(startQ, acState.start.coords, startQ);
+      const endPt = await resolve(endQ, acState.end.coords, endQ);
+      const viaPts = [];
+      for (const v of viaQueries){
+        viaPts.push(await resolve(v.text, v.coords, v.text));
+      }
+
+      const mandatory = [startPt, ...viaPts, endPt];
+      const prefSeconds = prefHours*3600;
+
+      const globalWaypoints = [{ lat:startPt.lat, lon:startPt.lon, label:startPt.label, known:true, type:'start', dur:0, dist:0, countryCode:startPt.countryCode, countryName:startPt.countryName }];
+      const allCoords = [];
+      let runningDur = 0, runningDist = 0, totalLegs = 0;
+
+      setStatus('Calculating driving route…');
+      for (let s=0; s<mandatory.length-1; s++){
+        const segStart = mandatory[s], segEnd = mandatory[s+1];
+        const route = await getRoute(segStart, segEnd);
+        const built = buildCumulative(route);
+        const segDuration = route.duration, segDistance = route.distance;
+
+        const numLegsSeg = Math.max(1, Math.ceil(segDuration/prefSeconds));
+        const perLeg = segDuration/numLegsSeg;
+
+        for (let i=1;i<numLegsSeg;i++){
+          const pt = coordAtTime(built, i*perLeg);
+          globalWaypoints.push({ lat:pt.lat, lon:pt.lon, known:false, type:'auto', dur:runningDur+pt.dur, dist:runningDist+pt.dist });
+        }
+
+        runningDur += segDuration;
+        runningDist += segDistance;
+        totalLegs += numLegsSeg;
+
+        lastRouteSegments.push({ built, segDistance });
+
+        const isLastSeg = s === mandatory.length-2;
+        globalWaypoints.push({
+          lat:segEnd.lat, lon:segEnd.lon, label:segEnd.label, known:true,
+          type: isLastSeg ? 'end' : 'via',
+          dur: runningDur, dist: runningDist,
+          countryCode:segEnd.countryCode, countryName:segEnd.countryName
+        });
+
+        allCoords.push(...route.geometry.coordinates);
+      }
+
+      const totalDuration = runningDur, totalDistance = runningDist;
+
+      // render skeleton rows immediately (with placeholders for reverse-geocoded stop names + towns)
+      renderSkeleton(globalWaypoints, totalLegs, totalDistance, totalDuration, restMinutes);
+      drawMap(allCoords, globalWaypoints);
+
+      // pass 1: resolve names + countries for auto-computed stops (needed for both display and the fuel estimator)
+      const autoWaypoints = globalWaypoints.filter(w=>w.type==='auto');
+      const autoCount = autoWaypoints.length;
+      let autoSeen = 0;
+      for (let i=0;i<globalWaypoints.length;i++){
+        const wp = globalWaypoints[i];
+        if (!wp.known){
+          autoSeen++;
+          setStatus(`Naming stop ${autoSeen} of ${autoCount}…`);
+          const rgKey = wp.lat.toFixed(5)+','+wp.lon.toFixed(5);
+          const wasCached = reverseGeoCache.has(rgKey);
+          try {
+            const rg = await reverseGeocode(wp.lat, wp.lon);
+            wp.label = rg.name;
+            wp.countryCode = rg.countryCode;
+            wp.countryName = rg.countryName;
+          } catch(e){
+            wp.label = 'Unnamed stop';
+          }
+          updateStopLabel(i, wp.label);
+          updateMarkerLabel(i, wp.label);
+          if (!wasCached) await sleep(1100);
+        }
+      }
+
+      const restTotalSeconds = restMinutes>0 ? restMinutes*60*totalLegs : 0;
+      const doneSuffix = restTotalSeconds>0 ? ` (${fmtHours(totalDuration+restTotalSeconds)} incl. rests)` : '';
+      lastTotals = { numLegs: totalLegs, totalDistance, totalDuration, restMinutes };
+
+      // build per-leg country/distance data for the fuel cost estimator, then reveal that section —
+      // this only needs names/countries (just resolved above), not nearby towns, so it can show right away
+      lastFuelLegs = [];
+      for (let i=0;i<totalLegs;i++){
+        const from = globalWaypoints[i], to = globalWaypoints[i+1];
+        lastFuelLegs.push({ distMeters: to.dist-from.dist, countryCode: to.countryCode||'', countryName: to.countryName||'' });
+      }
+      renderFuelSection();
+      fuelRangeControls.style.display = 'flex';
+      refreshRangeLabel();
+
+      // pass 2: nearby towns — slower and lower priority, so it runs after the fuel estimator is already visible
+      let townsSeen = 0;
+      for (let i=0;i<globalWaypoints.length;i++){
+        const wp = globalWaypoints[i];
+        if (wp.type==='auto'){
+          if (isFileProtocol){
+            updateTowns(i, 'ERROR');
+            continue;
+          }
+          townsSeen++;
+          setStatus(`Finding towns near stop ${townsSeen} of ${autoCount}…`);
+          const townsKey = wp.lat.toFixed(5)+','+wp.lon.toFixed(5)+'@'+radiusMeters;
+          const wasCached = townsGeoCache.has(townsKey);
+          try {
+            const towns = await nearbyTowns(wp.lat, wp.lon, radiusMeters);
+            updateTowns(i, towns);
+          } catch(e){
+            console.error('nearbyTowns failed', e);
+            updateTowns(i, 'ERROR');
+          }
+          if (!wasCached) await sleep(1100);
+        } else {
+          updateTowns(i, null);
+        }
+      }
+
+      setStatus(`Done — ${totalLegs} leg${totalLegs>1?'s':''}, ${fmtDist(totalDistance)} total${doneSuffix}.`, 'ok');
+
+    } catch(err){
+      console.error(err);
+      setStatus(err.message || 'Something went wrong.', 'err');
+      resultsArea.innerHTML = `<div class="empty-state"><span class="big">Couldn't build the route</span>${err.message||'Please check the locations and try again.'}</div>`;
+    } finally {
+      calcBtn.disabled = false;
+    }
+  }
+
+  let legDataCache = [];
+  let lastTotals = null;
+  let townsCacheByIndex = {};
+  let unitState = 'mi';
+
+  /* ---------- Fuel cost estimate ---------- */
+  const FUEL_DEFAULTS = { // approx. avg price per litre in GBP — rough, editable starting points
+    gb:{name:'United Kingdom', petrol:1.48, diesel:1.53},
+    fr:{name:'France',         petrol:1.75, diesel:1.68},
+    es:{name:'Spain',          petrol:1.55, diesel:1.48},
+    de:{name:'Germany',        petrol:1.65, diesel:1.58},
+    it:{name:'Italy',          petrol:1.75, diesel:1.65},
+    be:{name:'Belgium',        petrol:1.70, diesel:1.62},
+    nl:{name:'Netherlands',    petrol:1.95, diesel:1.65},
+    ch:{name:'Switzerland',    petrol:1.75, diesel:1.80},
+    at:{name:'Austria',        petrol:1.55, diesel:1.52},
+    pt:{name:'Portugal',       petrol:1.68, diesel:1.55},
+    ie:{name:'Ireland',        petrol:1.62, diesel:1.55},
+    pl:{name:'Poland',         petrol:1.25, diesel:1.28},
+    cz:{name:'Czechia',        petrol:1.35, diesel:1.38},
+    lu:{name:'Luxembourg',     petrol:1.45, diesel:1.38},
+    dk:{name:'Denmark',        petrol:1.75, diesel:1.65},
+    se:{name:'Sweden',         petrol:1.60, diesel:1.65},
+    no:{name:'Norway',         petrol:1.85, diesel:1.80},
+    us:{name:'United States',  petrol:0.75, diesel:0.85},
+    ca:{name:'Canada',         petrol:1.05, diesel:1.10}
+  };
+  const CURRENCY_RATES = { GBP:1, EUR:1.17, USD:1.27 }; // approx., base GBP — this is an estimate tool, not a live FX feed
+  const CURRENCY_SYMBOLS = { GBP:'£', EUR:'€', USD:'$' };
+  const ELECTRIC_DEFAULTS = { GBP:0.28, EUR:0.33, USD:0.35 }; // approx. price per kWh
+
+  let lastFuelLegs = []; // [{distMeters, countryCode, countryName}] populated after a successful route calc
+  let lastRouteSegments = []; // [{built, segDistance}] per mandatory-to-mandatory segment, for the fill-up station finder
+
+  const fuelTypeInput = $('fuelTypeInput'), efficiencyInput = $('efficiencyInput'),
+        efficiencyLabel = $('efficiencyLabel'), currencyInput = $('currencyInput'),
+        fuelControls = $('fuelControls'), fuelPlaceholder = $('fuelPlaceholder'), fuelTable = $('fuelTable'),
+        fuelRangeControls = $('fuelRangeControls'), rangeInput = $('rangeInput'), rangeLabel = $('rangeLabel'),
+        findStationsBtn = $('findStationsBtn'), stationStatus = $('stationStatus'), stationList = $('stationList');
+
+  function refreshRangeLabel(oldUnit){
+    rangeLabel.textContent = 'Range between fill-ups (' + (unitState==='mi' ? 'mi' : 'km') + ')';
+    if (!rangeInput.dataset.userSet){
+      rangeInput.value = unitState==='mi' ? 310 : 500;
+    } else if (oldUnit && oldUnit !== unitState){
+      const val = parseFloat(rangeInput.value) || 0;
+      const converted = unitState==='mi' ? val*0.621371 : val*1.60934;
+      rangeInput.value = Math.round(converted);
+    }
+  }
+  rangeInput.addEventListener('input', ()=>{ rangeInput.dataset.userSet = '1'; });
+
+  function fuelRowsFromLegs(){
+    const byCountry = {};
+    lastFuelLegs.forEach(leg=>{
+      const key = leg.countryCode || 'zz';
+      if (!byCountry[key]) byCountry[key] = { code:key, name: leg.countryName || (FUEL_DEFAULTS[key]&&FUEL_DEFAULTS[key].name) || 'Unknown', distMeters:0 };
+      byCountry[key].distMeters += leg.distMeters;
+    });
+    return Object.values(byCountry).sort((a,b)=>b.distMeters-a.distMeters);
+  }
+
+  function l100kmToMpgUk(l){ return l>0 ? 282.481/l : 0; }
+  function mpgUkToL100km(mpg){ return mpg>0 ? 282.481/mpg : 0; }
+
+  function renderFuelSection(){
+    if (!lastFuelLegs.length) return;
+    fuelPlaceholder.style.display = 'none';
+    fuelControls.style.display = 'flex';
+
+    const fuelType = fuelTypeInput.value;
+    const currency = currencyInput.value;
+    const symbol = CURRENCY_SYMBOLS[currency];
+
+    if (fuelType === 'electric'){
+      efficiencyLabel.textContent = 'Efficiency (kWh/100km)';
+      if (!efficiencyInput.dataset.userSet || efficiencyInput.dataset.lastType!=='electric') efficiencyInput.value = 18;
+      efficiencyInput.dataset.lastType = 'electric';
+      const totalKm = lastFuelLegs.reduce((s,l)=>s+l.distMeters,0)/1000;
+      const defaultRate = ELECTRIC_DEFAULTS[currency];
+      fuelTable.innerHTML = `
+        <div class="fuel-row head"><div>Electricity</div><div>Distance</div><div>Rate</div><div></div><div>Cost</div></div>
+        <div class="fuel-row" id="electricRow">
+          <div class="country-name">Whole trip</div>
+          <div class="dist-cell">${fmtDist(totalKm*1000)}</div>
+          <div>${symbol} <input type="number" class="price-input" id="electricPriceInput" value="${defaultRate.toFixed(2)}" min="0" step="0.01"> /kWh</div>
+          <div></div>
+          <div class="fuel-subtotal" id="electricSubtotal">—</div>
+        </div>`;
+      $('electricPriceInput').addEventListener('input', recomputeFuelTotals);
+    } else {
+      const useMpg = unitState === 'mi';
+      efficiencyLabel.textContent = useMpg ? 'Efficiency (MPG, UK gal)' : 'Efficiency (L/100km)';
+      if (!efficiencyInput.dataset.userSet || efficiencyInput.dataset.lastType==='electric'){
+        efficiencyInput.value = useMpg ? 40 : 7;
+      }
+      efficiencyInput.dataset.lastType = fuelType;
+
+      const rows = fuelRowsFromLegs();
+      let html = `<div class="fuel-row head"><div>Country</div><div>Distance</div><div>Price /L</div><div>Litres</div><div>Cost</div></div>`;
+      rows.forEach(r=>{
+        const def = FUEL_DEFAULTS[r.code];
+        const basePrice = def ? def[fuelType] : 1.60;
+        const price = (basePrice * CURRENCY_RATES[currency]).toFixed(2);
+        html += `
+          <div class="fuel-row" data-code="${r.code}" data-dist="${r.distMeters}">
+            <div class="country-name">${r.name}</div>
+            <div class="dist-cell">${fmtDist(r.distMeters)}</div>
+            <div>${symbol} <input type="number" class="price-input country-price" value="${price}" min="0" step="0.01"></div>
+            <div class="litres-val">—</div>
+            <div class="fuel-subtotal">—</div>
+          </div>`;
+      });
+      fuelTable.innerHTML = html;
+      fuelTable.querySelectorAll('.country-price').forEach(inp=> inp.addEventListener('input', recomputeFuelTotals));
+    }
+
+    recomputeFuelTotals();
+  }
+
+  function recomputeFuelTotals(){
+    if (!lastFuelLegs.length) return;
+    const fuelType = fuelTypeInput.value;
+    const currency = currencyInput.value;
+    const symbol = CURRENCY_SYMBOLS[currency];
+    const rawEfficiency = parseFloat(efficiencyInput.value) || 0;
+    const l100km = (fuelType!=='electric' && unitState==='mi') ? mpgUkToL100km(rawEfficiency) : rawEfficiency;
+    let grandTotal = 0;
+
+    if (fuelType === 'electric'){
+      const totalKm = lastFuelLegs.reduce((s,l)=>s+l.distMeters,0)/1000;
+      const kwh = (totalKm/100)*rawEfficiency;
+      const rate = parseFloat($('electricPriceInput').value) || 0;
+      grandTotal = kwh*rate;
+      $('electricSubtotal').textContent = symbol + grandTotal.toFixed(2);
+    } else {
+      fuelTable.querySelectorAll('.fuel-row[data-dist]').forEach(row=>{
+        const distMeters = parseFloat(row.dataset.dist);
+        const km = distMeters/1000;
+        const litres = (km/100)*l100km;
+        const price = parseFloat(row.querySelector('.country-price').value) || 0;
+        const cost = litres*price;
+        row.querySelector('.litres-val').textContent = litres.toFixed(1) + ' L';
+        row.querySelector('.fuel-subtotal').textContent = symbol + cost.toFixed(2);
+        grandTotal += cost;
+      });
+    }
+
+    let totalEl = document.getElementById('fuelGrandTotal');
+    if (!totalEl){
+      const wrap = document.createElement('div');
+      wrap.className = 'fuel-total-row';
+      wrap.innerHTML = `<span class="fuel-total-label">Estimated total fuel cost</span><span class="fuel-total-value" id="fuelGrandTotal"></span>`;
+      fuelTable.appendChild(wrap);
+      totalEl = document.getElementById('fuelGrandTotal');
+    }
+    totalEl.textContent = symbol + grandTotal.toFixed(2);
+  }
+
+  function refreshFuelForUnitChange(oldUnit, newUnit){
+    if (!lastFuelLegs.length) return;
+    // convert the efficiency figure itself (petrol/diesel only — electric stays kWh/100km regardless of unit)
+    if (fuelTypeInput.value !== 'electric' && oldUnit !== newUnit){
+      const val = parseFloat(efficiencyInput.value) || 0;
+      const converted = newUnit === 'mi' ? l100kmToMpgUk(val) : mpgUkToL100km(val);
+      efficiencyInput.value = Math.round(converted*10)/10;
+      efficiencyLabel.textContent = newUnit === 'mi' ? 'Efficiency (MPG, UK gal)' : 'Efficiency (L/100km)';
+    }
+    // refresh the distance column text (km/mi) without touching any edited prices
+    document.querySelectorAll('.dist-cell').forEach(el=>{
+      const row = el.closest('.fuel-row');
+      if (row && row.dataset.dist) el.textContent = fmtDist(parseFloat(row.dataset.dist));
+    });
+    const electricDistEl = document.querySelector('#electricRow .dist-cell');
+    if (electricDistEl){
+      const totalKm = lastFuelLegs.reduce((s,l)=>s+l.distMeters,0)/1000;
+      electricDistEl.textContent = fmtDist(totalKm*1000);
+    }
+    recomputeFuelTotals();
+  }
+
+  fuelTypeInput.addEventListener('change', renderFuelSection);
+  currencyInput.addEventListener('change', renderFuelSection);
+  efficiencyInput.addEventListener('input', ()=>{ efficiencyInput.dataset.userSet = '1'; recomputeFuelTotals(); });
+
+  /* ---------- Map ---------- */
+  let leafletMap = null;
+  let routeLine = null;
+  let mapMarkers = {};
+  let townMarkers = [];
+  let stationMarkers = [];
+  let markerRegistry = {}; // key -> {marker, baseRadius, baseFill} — lets a chip click "activate" its existing map marker
+  let activeMarkerKey = null;
+  const mapPlaceholder = $('mapPlaceholder');
+
+  function ensureMap(){
+    if (leafletMap) return leafletMap;
+    leafletMap = L.map('mapCanvas', { scrollWheelZoom:true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(leafletMap);
+    leafletMap.setView([48.85, 2.35], 5); // fallback view
+    return leafletMap;
+  }
+
+  function markerKey(prefix, lat, lon){
+    return prefix + parseFloat(lat).toFixed(5) + ',' + parseFloat(lon).toFixed(5);
+  }
+
+  function registerMarker(key, marker, baseRadius, baseFill){
+    markerRegistry[key] = { marker, baseRadius, baseFill };
+  }
+
+  function clearMarkerGroup(map, arr, registryPrefix){
+    arr.forEach(m => map.removeLayer(m));
+    arr.length = 0;
+    Object.keys(markerRegistry).forEach(k=>{ if (k.startsWith(registryPrefix)) delete markerRegistry[k]; });
+    if (activeMarkerKey && activeMarkerKey.startsWith(registryPrefix)) activeMarkerKey = null;
+  }
+
+  function activateRegisteredMarker(key, title, name){
+    const map = ensureMap();
+    if (activeMarkerKey && markerRegistry[activeMarkerKey]){
+      const prev = markerRegistry[activeMarkerKey];
+      prev.marker.setStyle({ radius: prev.baseRadius, fillColor: prev.baseFill });
+    }
+    const entry = markerRegistry[key];
+    if (!entry) return;
+    entry.marker.setStyle({ radius: entry.baseRadius+3, fillColor:'#E2A63B' });
+    activeMarkerKey = key;
+    entry.marker.openPopup();
+    map.flyTo(entry.marker.getLatLng(), Math.max(map.getZoom(), 11), { duration:0.6 });
+    const mapOuter = document.querySelector('.map-outer');
+    if (mapOuter) mapOuter.scrollIntoView({ behavior:'smooth', block:'center' });
+  }
+
+  function markerColor(wp){
+    if (wp.type==='start') return '#153D2B';
+    if (wp.type==='end') return '#3B6E8F';
+    if (wp.type==='via') return '#7A4FA3';
+    return '#DD9A2E'; // auto split stop
+  }
+
+  function markerTitle(wp){
+    if (wp.type==='start') return 'Start';
+    if (wp.type==='end') return 'Finish';
+    if (wp.type==='via') return 'Via stop';
+    return 'Leg stop';
+  }
+
+  function drawMap(coords, waypoints){
+    const map = ensureMap();
+    mapPlaceholder.classList.add('hidden');
+
+    // clear previous layers
+    if (routeLine){ map.removeLayer(routeLine); routeLine = null; }
+    Object.values(mapMarkers).forEach(m => map.removeLayer(m));
+    mapMarkers = {};
+    clearMarkerGroup(map, townMarkers, 'town:');
+    clearMarkerGroup(map, stationMarkers, 'station:');
+
+    const latlngs = coords.map(c => [c[1], c[0]]);
+    routeLine = L.polyline(latlngs, { color:'#3B6E8F', weight:4, opacity:0.85 }).addTo(map);
+
+    waypoints.forEach((wp, i)=>{
+      const marker = L.circleMarker([wp.lat, wp.lon], {
+        radius: (wp.type==='start'||wp.type==='end') ? 8 : 7,
+        color:'#fff',
+        weight:2,
+        fillColor: markerColor(wp),
+        fillOpacity:1
+      }).addTo(map);
+      marker.bindPopup(`<div class="pop-title">${markerTitle(wp)}</div>${wp.label || 'Locating…'}`);
+      mapMarkers[i] = marker;
+    });
+
+    map.fitBounds(routeLine.getBounds(), { padding:[28,28] });
+    // give the tile layer a beat to catch up to the (possibly just-unhidden) container size
+    setTimeout(()=> map.invalidateSize(), 150);
+  }
+
+  function updateMarkerLabel(i, label){
+    const marker = mapMarkers[i];
+    if (!marker) return;
+    const title = i===0 ? 'Start' : 'Leg stop';
+    marker.setPopupContent(`<div class="pop-title">${title}</div>${label}`);
+  }
+
+  const TOWN_MARKER_COLOR = '#1B8A7A';
+
+  function popupHtml(title, name, lat, lon){
+    return `<div class="pop-title">${title}</div>${name}<button type="button" class="popup-add-btn" data-lat="${lat}" data-lon="${lon}" data-name="${name.replace(/"/g,'&quot;')}">+ Add to route</button>`;
+  }
+
+  function drawTownMarker(t){
+    const map = ensureMap();
+    const marker = L.circleMarker([t.lat, t.lon], {
+      radius: 6,
+      color:'#fff',
+      weight:2,
+      fillColor: TOWN_MARKER_COLOR,
+      fillOpacity:1
+    }).addTo(map);
+    marker.bindPopup(popupHtml('Nearby town', t.name, t.lat, t.lon));
+    townMarkers.push(marker);
+    registerMarker(markerKey('town:', t.lat, t.lon), marker, 6, TOWN_MARKER_COLOR);
+  }
+
+  // delegated click handler — town chips are re-rendered dynamically so this must live on a stable ancestor
+  resultsArea.addEventListener('click', e=>{
+    const chip = e.target.closest('.town-chip');
+    if (!chip || !chip.dataset.lat) return;
+    const lat = parseFloat(chip.dataset.lat), lon = parseFloat(chip.dataset.lon);
+    if (isNaN(lat) || isNaN(lon)) return;
+    document.querySelectorAll('.town-chip.chip-active').forEach(c=>c.classList.remove('chip-active'));
+    chip.classList.add('chip-active');
+    activateRegisteredMarker(markerKey('town:', lat, lon), 'Nearby town', chip.dataset.name || 'Nearby town');
+  });
+  resultsArea.addEventListener('keydown', e=>{
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const chip = e.target.closest('.town-chip');
+    if (!chip) return;
+    e.preventDefault();
+    chip.click();
+  });
+
+  /* ---------- Fill-up station finder ---------- */
+  const STATION_SEARCH_RADIUS_METERS = 20 * 1609.344; // 20 miles, regardless of the km/mi display toggle
+  const STATION_OPTIONS_PER_STOP = 3;
+
+  async function stationsNear(lat, lon, amenityTag, radiusMeters, limit){
+    const query = `[out:json][timeout:20];node(around:${radiusMeters},${lat},${lon})[amenity=${amenityTag}];out body 25;`;
+    const data = await overpassQuery(query);
+    const candidates = (data.elements||[])
+      .filter(el => typeof el.lat === 'number')
+      .map(el => ({
+        lat: el.lat, lon: el.lon,
+        name: (el.tags && (el.tags.name || el.tags.brand || el.tags.operator)) || (amenityTag==='fuel' ? 'Fuel station' : 'Charging station'),
+        dist: haversine(lat, lon, el.lat, el.lon)
+      }))
+      .sort((a,b)=>a.dist-b.dist);
+    return candidates.slice(0, limit);
+  }
+
+  function stationChipHtml(s){
+    return `<span class="station-chip" tabindex="0" role="button" data-lat="${s.lat}" data-lon="${s.lon}" data-name="${s.name.replace(/"/g,'&quot;')}" title="Show on map">⛽ ${s.name} <span class="dist">${townDistLabel(s.dist)} off-route</span></span>`;
+  }
+
+  function stationGroupHtml(stations, fillPointIndex){
+    const label = `<div class="station-group-label">Fill-up ${fillPointIndex}</div>`;
+    if (!stations.length){
+      return `<div class="station-group">${label}<div class="station-group-chips"><span class="station-chip" style="cursor:default;"><span class="miss-icon">✕</span> no station found within 20mi</span></div></div>`;
+    }
+    return `<div class="station-group">${label}<div class="station-group-chips">${stations.map(stationChipHtml).join('')}</div></div>`;
+  }
+
+  function drawStationMarker(lat, lon, name){
+    const map = ensureMap();
+    const marker = L.circleMarker([lat, lon], {
+      radius: 7,
+      color:'#fff',
+      weight:2,
+      fillColor:'#B5493A',
+      fillOpacity:1
+    }).addTo(map);
+    marker.bindPopup(popupHtml('Fill-up stop', name, lat, lon));
+    stationMarkers.push(marker);
+    registerMarker(markerKey('station:', lat, lon), marker, 7, '#B5493A');
+  }
+
+  async function findFuelStations(){
+    if (!lastRouteSegments.length) return;
+    if (isFileProtocol){
+      stationStatus.textContent = 'Fill-up search needs the page served over http(s) — see the notice above.';
+      stationStatus.className = 'status-text err';
+      return;
+    }
+    const rangeRaw = parseFloat(rangeInput.value);
+    if (!rangeRaw || rangeRaw<=0){
+      stationStatus.textContent = 'Enter a range greater than 0 first.';
+      stationStatus.className = 'status-text err';
+      return;
+    }
+    const rangeMeters = rangeRaw * (unitState==='mi' ? 1609.344 : 1000);
+    const amenityTag = fuelTypeInput.value === 'electric' ? 'charging_station' : 'fuel';
+
+    // gather fill-up points — the range resets at each via/mandatory stop, same assumption as the rest-break logic
+    const fillPoints = [];
+    lastRouteSegments.forEach(seg=>{
+      for (let d=rangeMeters; d<seg.segDistance; d+=rangeMeters){
+        fillPoints.push(coordAtDistance(seg.built, d));
+      }
+    });
+
+    if (!fillPoints.length){
+      stationStatus.textContent = 'Your whole route fits within one range — no fill-up needed.';
+      stationStatus.className = 'status-text ok';
+      stationList.innerHTML = '';
+      stationMarkers.forEach(m => leafletMap && leafletMap.removeLayer(m));
+      stationMarkers = [];
+      Object.keys(markerRegistry).forEach(k=>{ if (k.startsWith('station:')) delete markerRegistry[k]; });
+      return;
+    }
+
+    findStationsBtn.disabled = true;
+    stationList.innerHTML = '';
+    const map = ensureMap();
+    clearMarkerGroup(map, stationMarkers, 'station:');
+
+    let html = '';
+    for (let i=0;i<fillPoints.length;i++){
+      stationStatus.textContent = `Searching fill-up point ${i+1} of ${fillPoints.length}…`;
+      stationStatus.className = 'status-text';
+      try {
+        const stations = await stationsNear(fillPoints[i].lat, fillPoints[i].lon, amenityTag, STATION_SEARCH_RADIUS_METERS, STATION_OPTIONS_PER_STOP);
+        html += stationGroupHtml(stations, i+1);
+        stations.forEach(s => drawStationMarker(s.lat, s.lon, s.name));
+      } catch(e){
+        console.error('stationsNear failed', e);
+        html += `<div class="station-group"><div class="station-group-label">Fill-up ${i+1}</div><div class="station-group-chips"><span class="station-chip" style="cursor:default;"><span class="miss-icon">✕</span> search failed</span></div></div>`;
+      }
+      stationList.innerHTML = html;
+      await sleep(1100);
+    }
+
+    stationStatus.textContent = `Done — checked ${fillPoints.length} fill-up point${fillPoints.length>1?'s':''} along the route.`;
+    stationStatus.className = 'status-text ok';
+    findStationsBtn.disabled = false;
+  }
+
+  findStationsBtn.addEventListener('click', findFuelStations);
+  stationList.addEventListener('click', e=>{
+    const chip = e.target.closest('.station-chip');
+    if (!chip || !chip.dataset.lat) return;
+    const lat = parseFloat(chip.dataset.lat), lon = parseFloat(chip.dataset.lon);
+    if (isNaN(lat) || isNaN(lon)) return;
+    document.querySelectorAll('.station-chip.chip-active').forEach(c=>c.classList.remove('chip-active'));
+    chip.classList.add('chip-active');
+    activateRegisteredMarker(markerKey('station:', lat, lon), 'Fill-up stop', chip.dataset.name || 'Station');
+  });
+  stationList.addEventListener('keydown', e=>{
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const chip = e.target.closest('.station-chip');
+    if (!chip) return;
+    e.preventDefault();
+    chip.click();
+  });
+
+  function townsCellContent(to){
+    if (to.type === 'end') return '<span class="towns-loading">final destination</span>';
+    if (to.type === 'via') return '<span class="towns-loading">your stop</span>';
+    const cached = townsCacheByIndex[to._idx];
+    return (cached !== undefined) ? townsHtml(cached) : renderTownsPlaceholder();
+  }
+
+  function restCellContent(legIndex, numLegs, legDur, restMinutes){
+    if (restMinutes<=0){
+      return `${fmtHours(legDur)}<span class="sub">no rest set</span>`;
+    }
+    const restSeconds = restMinutes*60;
+    return `${fmtHours(legDur+restSeconds)}<span class="sub">${fmtHours(legDur)} drive, incl. ${restMinutes}m break mid-leg</span>`;
+  }
+
+  function renderSkeleton(waypoints, numLegs, totalDistance, totalDuration, restMinutes){
+    legDataCache = waypoints;
+    waypoints.forEach((w,idx)=> w._idx = idx);
+    let rows = '';
+    for (let i=0;i<numLegs;i++){
+      const from = waypoints[i], to = waypoints[i+1];
+      const legDur = to.dur - from.dur;
+      const legDist = to.dist - from.dist;
+      rows += `
+        <div class="leg-row" data-leg="${i}">
+          <div class="leg-num">${i+1}</div>
+          <div class="leg-place" id="fromLabel${i}">${from.label ? from.label : '<span class="towns-loading">resolving…</span>'}</div>
+          <div class="leg-place" id="toLabel${i+1}">${to.label ? to.label : '<span class="towns-loading">resolving…</span>'}<span class="sub">~${fmtHours(legDur)} leg</span></div>
+          <div class="leg-dist">${fmtDist(legDist)}</div>
+          <div class="leg-time">${fmtHours(legDur)}</div>
+          <div class="rest-cell">${restCellContent(i, numLegs, legDur, restMinutes)}</div>
+          <div class="towns-cell" id="towns${i+1}">${townsCellContent(to)}</div>
+        </div>`;
+    }
+    const restSeconds = restMinutes>0 ? restMinutes*60*numLegs : 0;
+    const restNote = restSeconds>0 ? `<span class="sub">incl. ${numLegs}×${restMinutes}m breaks</span>` : '';
+    resultsArea.innerHTML = `
+      <div class="results-head">
+        <div>Leg</div><div>From</div><div>To</div><div>Distance</div><div>Drive time</div><div>Drive + rest</div><div>Towns nearby</div>
+      </div>
+      <div class="results-body">${rows}</div>
+      <div class="totals-row">
+        <div></div><div>Total</div><div></div><div>${fmtDist(totalDistance)}</div><div>${fmtHours(totalDuration)}</div><div>${fmtHours(totalDuration+restSeconds)}${restNote}</div><div>${numLegs} leg${numLegs>1?'s':''}</div>
+      </div>`;
+  }
+
+  function reRenderForUnits(){
+    if (!lastTotals || !legDataCache.length) return;
+    renderSkeleton(legDataCache, lastTotals.numLegs, lastTotals.totalDistance, lastTotals.totalDuration, lastTotals.restMinutes);
+  }
+
+  function updateStopLabel(waypointIndex, label){
+    // this waypoint appears as "to" on leg (waypointIndex-1) and "from" on leg (waypointIndex)
+    const toEl = document.getElementById('toLabel'+waypointIndex);
+    if (toEl){
+      const sub = toEl.querySelector('.sub');
+      toEl.innerHTML = label + (sub ? sub.outerHTML : '');
+    }
+    const fromEl = document.getElementById('fromLabel'+waypointIndex);
+    if (fromEl) fromEl.textContent = label;
+  }
+
+  function updateTowns(waypointIndex, towns){
+    if (towns !== null) townsCacheByIndex[waypointIndex] = towns;
+    const el = document.getElementById('towns'+waypointIndex);
+    if (towns === null) return; // leave as-is (start point has no towns cell target)
+    if (Array.isArray(towns)) towns.forEach(t => drawTownMarker(t));
+    if (!el) return;
+    el.innerHTML = townsHtml(towns);
+  }
+
+  const unitSwitch = $('unitSwitch');
+  const radiusInput = $('radiusInput');
+
+  function updateRadiusLabels(){
+    radiusInput.querySelectorAll('option').forEach(opt=>{
+      const km = parseFloat(opt.dataset.km);
+      if (unitState === 'mi'){
+        opt.textContent = Math.round(km*0.621371) + ' mi radius';
+      } else {
+        opt.textContent = km + ' km radius';
+      }
+    });
+  }
+
+  unitSwitch.addEventListener('click', ()=>{
+    const oldUnit = unitState;
+    unitState = unitState === 'km' ? 'mi' : 'km';
+    unitSwitch.setAttribute('aria-checked', unitState==='mi' ? 'true' : 'false');
+    updateRadiusLabels();
+    reRenderForUnits();
+    refreshFuelForUnitChange(oldUnit, unitState);
+    refreshRangeLabel(oldUnit);
+  });
+  updateRadiusLabels(); // reflect the default unit (miles) on first load
+
+  calcBtn.addEventListener('click', run);
+
+  /* ---------- Autocomplete ---------- */
+  const acState = {
+    start: { list: $('startAcList'), input: startInput, results: [], hl: -1, coords: null, debounce: null },
+    end:   { list: $('endAcList'),   input: endInput,   results: [], hl: -1, coords: null, debounce: null }
+  };
+
+  async function fetchSuggestions(query){
+    const url = `${NOMINATIM}/search?q=${encodeURIComponent(query)}&format=jsonv2&limit=6&addressdetails=1`;
+    const res = await fetch(url, {headers:{'Accept':'application/json'}});
+    if (!res.ok) return [];
+    return res.json();
+  }
+
+  function renderAcList(state){
+    const { list, results, hl } = state;
+    if (!results.length){
+      list.innerHTML = '<div class="ac-empty">No matches — try a different spelling or add a country</div>';
+      list.classList.add('open');
+      return;
+    }
+    list.innerHTML = results.map((r,i)=>{
+      const main = (r.address && (r.address.city||r.address.town||r.address.village||r.address.municipality)) || r.display_name.split(',')[0];
+      const sub = r.display_name;
+      return `<div class="ac-item${i===hl?' hl':''}" data-idx="${i}"><span class="ac-main">${main}</span><span class="ac-sub">${sub}</span></div>`;
+    }).join('');
+    list.classList.add('open');
+  }
+
+  function closeAcList(state){
+    state.list.classList.remove('open');
+    state.hl = -1;
+  }
+
+  function selectSuggestion(state, idx){
+    const r = state.results[idx];
+    if (!r) return;
+    state.input.value = r.display_name;
+    const a = r.address || {};
+    state.coords = { lat: parseFloat(r.lat), lon: parseFloat(r.lon), label: r.display_name, countryCode:(a.country_code||'').toLowerCase(), countryName:a.country||'' };
+    closeAcList(state);
+  }
+
+  Object.entries(acState).forEach(([key, state])=> wireAutocomplete(state));
+
+  function wireAutocomplete(state){
+    state.input.addEventListener('input', ()=>{
+      state.coords = null; // typed text no longer matches a confirmed selection
+      clearTimeout(state.debounce);
+      const q = state.input.value.trim();
+      if (q.length < 3){ closeAcList(state); return; }
+      state.debounce = setTimeout(async ()=>{
+        try {
+          const results = await fetchSuggestions(q);
+          state.results = results;
+          state.hl = -1;
+          renderAcList(state);
+        } catch(e){ /* silent — user can still hit Calculate to try a full geocode */ }
+      }, 350);
+    });
+
+    state.input.addEventListener('keydown', e=>{
+      const open = state.list.classList.contains('open');
+      if (open && (e.key==='ArrowDown' || e.key==='ArrowUp')){
+        e.preventDefault();
+        const max = state.results.length-1;
+        if (max<0) return;
+        state.hl = e.key==='ArrowDown' ? Math.min(max, state.hl+1) : Math.max(0, state.hl-1);
+        renderAcList(state);
+        return;
+      }
+      if (e.key==='Enter'){
+        if (open && state.hl>=0){
+          e.preventDefault();
+          selectSuggestion(state, state.hl);
+        } else {
+          closeAcList(state);
+          run();
+        }
+        return;
+      }
+      if (e.key==='Escape'){ closeAcList(state); }
+    });
+
+    state.list.addEventListener('click', e=>{
+      const item = e.target.closest('.ac-item');
+      if (!item) return;
+      selectSuggestion(state, parseInt(item.dataset.idx,10));
+    });
+
+    state.input.addEventListener('blur', ()=>{
+      // slight delay so a click on the list registers before it closes
+      setTimeout(()=> closeAcList(state), 150);
+    });
+  }
+
+  /* ---------- Via stops ---------- */
+  const viaContainer = $('viaContainer');
+  const viaRows = [];
+  let viaSeq = 0;
+
+  function renumberViaRows(){
+    viaRows.forEach((v, idx)=>{
+      v.rowhead.textContent = 'V' + (idx+1);
+      v.label.textContent = 'Via stop ' + (idx+1);
+    });
+  }
+
+  function addViaRow(prefill){
+    viaSeq++;
+    const uid = 'via' + viaSeq;
+
+    const rowheadEl = document.createElement('div');
+    rowheadEl.className = 'rowhead via-rowhead';
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'label-cell';
+
+    const inputCellEl = document.createElement('div');
+    inputCellEl.className = 'input-cell';
+    inputCellEl.innerHTML = `
+      <div class="autocomplete-wrap">
+        <input type="text" id="${uid}Input" placeholder="e.g. Reims, France" autocomplete="off" style="padding-right:34px;">
+        <button type="button" class="via-remove-btn" title="Remove this stop">&times;</button>
+        <div class="ac-list" id="${uid}AcList"></div>
+      </div>`;
+
+    viaContainer.appendChild(rowheadEl);
+    viaContainer.appendChild(labelEl);
+    viaContainer.appendChild(inputCellEl);
+
+    const input = inputCellEl.querySelector('input');
+    const list = inputCellEl.querySelector('.ac-list');
+    const removeBtn = inputCellEl.querySelector('.via-remove-btn');
+
+    const state = { list, input, results:[], hl:-1, coords:null, debounce:null };
+    wireAutocomplete(state);
+
+    const rowObj = { uid, rowhead:rowheadEl, label:labelEl, inputCell:inputCellEl, input, acState:state };
+    viaRows.push(rowObj);
+    renumberViaRows();
+
+    removeBtn.addEventListener('click', ()=>{
+      rowheadEl.remove(); labelEl.remove(); inputCellEl.remove();
+      const idx = viaRows.indexOf(rowObj);
+      if (idx>-1) viaRows.splice(idx,1);
+      renumberViaRows();
+    });
+
+    if (prefill){
+      input.value = prefill.label;
+      if (typeof prefill.lat === 'number' && typeof prefill.lon === 'number'){
+        state.coords = { lat: prefill.lat, lon: prefill.lon, label: prefill.label };
+      }
+    } else {
+      input.focus();
+    }
+    return rowObj;
+  }
+
+  $('addViaBtn').addEventListener('click', ()=> addViaRow());
+
+  function addLocationAsViaStop(lat, lon, name){
+    addViaRow({ lat, lon, label: name });
+    setStatus(`${name} added — recalculating route…`);
+    viaContainer.scrollIntoView({ behavior:'smooth', block:'center' });
+    run(); // unchanged legs are served from cache, so only the affected leg actually re-fetches
+  }
+
+  /* ---------- Save / load a route as a file ---------- */
+  function clearAllViaRows(){
+    viaRows.slice().forEach(rowObj=>{
+      rowObj.rowhead.remove(); rowObj.label.remove(); rowObj.inputCell.remove();
+    });
+    viaRows.length = 0;
+  }
+
+  function slugify(s){
+    return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-+|-+$)/g,'').slice(0,40) || 'route';
+  }
+
+  function setSaveLoadStatus(msg, kind){
+    saveLoadStatus.textContent = msg;
+    saveLoadStatus.className = 'status-text' + (kind ? ' '+kind : '');
+  }
+
+  function serializeRoute(){
+    const vias = viaRows
+      .map(v => ({ text: v.input.value.trim(), coords: v.acState.coords }))
+      .filter(v => v.text.length);
+    return {
+      kind: 'waypoint-trip-sheet-route',
+      version: 1,
+      tripName: tabLabel.textContent,
+      start: { text: startInput.value.trim(), coords: acState.start.coords },
+      end: { text: endInput.value.trim(), coords: acState.end.coords },
+      vias,
+      prefHours: hoursInput.value,
+      radiusMeters: radiusInput.value,
+      restMinutes: restInput.value,
+      unit: unitState,
+      fuel: {
+        type: fuelTypeInput.value,
+        efficiency: efficiencyInput.value,
+        currency: currencyInput.value,
+        range: rangeInput.value
+      }
+    };
+  }
+
+  function saveRoute(){
+    const startQ = startInput.value.trim(), endQ = endInput.value.trim();
+    if (!startQ || !endQ){
+      setSaveLoadStatus('Enter a start and finish before saving.', 'err');
+      return;
+    }
+    const data = serializeRoute();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const filename = `waypoint-${slugify(startQ)}-to-${slugify(endQ)}.json`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setSaveLoadStatus('Saved as ' + filename, 'ok');
+  }
+
+  function applyLoadedRoute(data){
+    if (!data || typeof data !== 'object' || !data.start || !data.end){
+      setSaveLoadStatus('That file doesn\'t look like a saved route from this tool.', 'err');
+      return;
+    }
+
+    clearAllViaRows();
+
+    startInput.value = data.start.text || '';
+    acState.start.coords = data.start.coords || null;
+
+    endInput.value = data.end.text || '';
+    acState.end.coords = data.end.coords || null;
+
+    (data.vias||[]).forEach(v=>{
+      const coords = v.coords || {};
+      addViaRow({ label: v.text, lat: coords.lat, lon: coords.lon });
+    });
+
+    if (data.prefHours) hoursInput.value = data.prefHours;
+    if (data.radiusMeters) radiusInput.value = data.radiusMeters;
+    if (data.restMinutes !== undefined) restInput.value = data.restMinutes;
+
+    if (data.unit && data.unit !== unitState){
+      unitSwitch.click(); // reuses the existing unit-change wiring (labels, conversions) rather than duplicating it
+    }
+    updateRadiusLabels();
+
+    if (data.fuel){
+      if (data.fuel.type) fuelTypeInput.value = data.fuel.type;
+      if (data.fuel.efficiency){ efficiencyInput.value = data.fuel.efficiency; efficiencyInput.dataset.userSet = '1'; efficiencyInput.dataset.lastType = data.fuel.type; }
+      if (data.fuel.currency) currencyInput.value = data.fuel.currency;
+      if (data.fuel.range){ rangeInput.value = data.fuel.range; rangeInput.dataset.userSet = '1'; }
+    }
+
+    if (data.tripName) tabLabel.textContent = data.tripName;
+
+    setSaveLoadStatus('Route loaded — recalculating…', 'ok');
+    run();
+  }
+
+  function loadRouteFromFile(file){
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try {
+        applyLoadedRoute(JSON.parse(reader.result));
+      } catch(e){
+        setSaveLoadStatus('Could not read that file — is it a route saved from this tool?', 'err');
+      }
+    };
+    reader.onerror = ()=> setSaveLoadStatus('Could not read that file.', 'err');
+    reader.readAsText(file);
+  }
+
+  const saveLoadStatus = $('saveLoadStatus');
+  $('saveRouteBtn').addEventListener('click', saveRoute);
+  $('loadRouteBtn').addEventListener('click', ()=> $('loadRouteFile').click());
+  $('loadRouteFile').addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if (file) loadRouteFromFile(file);
+    e.target.value = ''; // allow re-selecting the same filename later
+  });
+
+  // delegated — popup buttons are injected by Leaflet outside our normal DOM containers
+  document.addEventListener('click', e=>{
+    const btn = e.target.closest('.popup-add-btn');
+    if (!btn) return;
+    const lat = parseFloat(btn.dataset.lat), lon = parseFloat(btn.dataset.lon);
+    if (isNaN(lat) || isNaN(lon)) return;
+    addLocationAsViaStop(lat, lon, btn.dataset.name || 'Stop');
+  });
+
+  // Renamable tab (double-click to edit, like a spreadsheet sheet tab)
+  const tabLabel = $('tabRoadtripLabel');
+  tabLabel.addEventListener('dblclick', e=>{
+    e.stopPropagation();
+    tabLabel.dataset.orig = tabLabel.textContent;
+    tabLabel.contentEditable = 'true';
+    tabLabel.focus();
+    const range = document.createRange();
+    range.selectNodeContents(tabLabel);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+  tabLabel.addEventListener('keydown', e=>{
+    if (e.key === 'Enter'){ e.preventDefault(); tabLabel.blur(); }
+    if (e.key === 'Escape'){ tabLabel.textContent = tabLabel.dataset.orig || 'Road Trip'; tabLabel.blur(); }
+  });
+  tabLabel.addEventListener('blur', ()=>{
+    tabLabel.contentEditable = 'false';
+    const val = tabLabel.textContent.replace(/\s+/g,' ').trim();
+    tabLabel.textContent = val.length ? val.slice(0,30) : (tabLabel.dataset.orig || 'Road Trip');
+  });
+  // clicking (not double-clicking) the label while it isn't being edited shouldn't start editing
+  tabLabel.addEventListener('click', e=>{ if (tabLabel.contentEditable !== 'true') e.preventDefault(); });
+
+  // Tab switching (single-destination is a stub for now)
+  $('tabSingle').addEventListener('click', ()=>{
+    setStatus('Single-destination mode is next on the list — road trip mode first.', 'err');
+  });
+})();
+</script>
+
+</body>
+</html>
