@@ -455,8 +455,8 @@
   }
   .town-chip.chip-active .dist{color:#C7D3C9;}
   .town-chip .dist{color:var(--ink-soft);}
-  .amenity-chip-row{width:100%;display:flex;flex-wrap:wrap;gap:6px;}
-  .amenity-chip-row:empty{display:none;}
+  .chip-row{width:100%;display:flex;flex-wrap:wrap;gap:6px;}
+  .chip-row:empty{display:none;}
   .amenity-chip{
     font-family:'IBM Plex Mono',monospace;
     font-size:11.5px;
@@ -2116,7 +2116,7 @@
     if (to.type === 'via') return '<span class="towns-loading">your stop</span>';
     const cached = townsCacheByIndex[to._idx];
     const townsPart = (cached !== undefined) ? townsHtml(cached) : renderTownsPlaceholder();
-    return `<div id="townList${to._idx}">${townsPart}</div><div class="amenity-chip-row" id="amenities${to._idx}"></div>`;
+    return `<div class="chip-row" id="townList${to._idx}">${townsPart}</div><div class="chip-row" id="amenities${to._idx}"></div>`;
   }
 
   function restCellContent(legIndex, numLegs, legDur, restMinutes){
