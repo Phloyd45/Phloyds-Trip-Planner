@@ -510,6 +510,19 @@
     font-style:italic;
   }
   .towns-loading.err-text{color:var(--danger);}
+  .retry-btn{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--danger);
+    background:#FBEAE7;
+    border:1px solid #E8C4BD;
+    padding:2px 9px;
+    border-radius:20px;
+    cursor:pointer;
+    margin-left:6px;
+    vertical-align:middle;
+  }
+  .retry-btn:hover{background:#F5D6CF;}
 
   .totals-row{
     display:grid;
@@ -1327,8 +1340,12 @@
     return `<span class="amenity-chip chip-${a.type}" tabindex="0" role="button" data-lat="${a.lat}" data-lon="${a.lon}" data-name="${a.name.replace(/"/g,'&quot;')}" data-type="${a.type}" title="Show on map">${a.icon} ${a.name}${a.petFriendly?' 🐾':''} <span class="dist">${townDistLabel(a.dist)}</span></span>`;
   }
 
-  function amenitiesHtml(list){
-    if (list === 'ERROR') return `<span class="towns-loading err-text">overnight-stop search unavailable right now</span>`;
+  function retryBtnHtml(kind, idx){
+    return `<button type="button" class="retry-btn" data-retry="${kind}" data-idx="${idx}">↻ Retry</button>`;
+  }
+
+  function amenitiesHtml(list, idx){
+    if (list === 'ERROR') return `<span class="towns-loading err-text">overnight-stop search unavailable right now</span>${retryBtnHtml('amenities', idx)}`;
     if (!list || !list.length) return '';
     return list.map(amenityChipHtml).join('');
   }
@@ -1388,8 +1405,8 @@
   }
 
   const placeAbbrev = { city:'city', town:'town', suburb:'sub' };
-  function townsHtml(towns){
-    if (towns === 'ERROR') return `<span class="towns-loading err-text">${isFileProtocol ? 'unavailable — see notice above' : 'nearby-town search unavailable right now'}</span>`;
+  function townsHtml(towns, idx){
+    if (towns === 'ERROR') return `<span class="towns-loading err-text">${isFileProtocol ? 'unavailable — see notice above' : 'nearby-town search unavailable right now'}</span>${isFileProtocol ? '' : retryBtnHtml('towns', idx)}`;
     if (!towns || !towns.length) return '<span class="towns-loading">no nearby towns found within radius</span>';
     return towns.map(t => {
       const tag = placeAbbrev[t.place] ? `<span class="place-tag">${placeAbbrev[t.place]}</span>` : '';
@@ -2079,7 +2096,7 @@
 
   function fuelStopNameHtml(row){
     if (row.stations === null) return '<span class="towns-loading">searching…</span>';
-    if (row.stations === 'ERROR') return '<span class="towns-loading err-text">search failed</span>';
+    if (row.stations === 'ERROR') return `<span class="towns-loading err-text">search failed</span>${retryBtnHtml('fuel', lastFuelStopRows.indexOf(row))}`;
     if (!row.stations.length) return '<span class="towns-loading">no station found within 20mi</span>';
     return row.stations.map(stationChipHtml).join('');
   }
@@ -2222,7 +2239,7 @@
     if (to.type === 'end') return '<span class="towns-loading">final destination</span>';
     if (to.type === 'via') return '<span class="towns-loading">your stop</span>';
     const cached = townsCacheByIndex[to._idx];
-    const townsPart = (cached !== undefined) ? townsHtml(cached) : renderTownsPlaceholder();
+    const townsPart = (cached !== undefined) ? townsHtml(cached, to._idx) : renderTownsPlaceholder();
     return `<div class="chip-row" id="townList${to._idx}">${townsPart}</div><div class="chip-row" id="amenities${to._idx}"></div>`;
   }
 
@@ -2298,7 +2315,7 @@
     if (towns === null) return; // leave as-is (start point has no towns cell target)
     if (Array.isArray(towns)) towns.forEach(t => drawTownMarker(t));
     if (!el) return;
-    el.innerHTML = townsHtml(towns);
+    el.innerHTML = townsHtml(towns, waypointIndex);
   }
 
   function updateAmenities(waypointIndex, list){
@@ -2306,8 +2323,65 @@
     if (Array.isArray(list)) list.forEach(a => drawAmenityMarker(a));
     const el = document.getElementById('amenities'+waypointIndex);
     if (!el) return;
-    el.innerHTML = amenitiesHtml(list);
+    el.innerHTML = amenitiesHtml(list, waypointIndex);
   }
+
+  async function retryTownsSearch(idx){
+    const wp = legDataCache[idx];
+    if (!wp) return;
+    const el = document.getElementById('townList'+idx);
+    if (el) el.innerHTML = renderTownsPlaceholder();
+    const radiusMeters = parseInt(radiusInput.value, 10);
+    try {
+      const towns = await nearbyTowns(wp.lat, wp.lon, radiusMeters);
+      updateTowns(idx, towns);
+    } catch(e){
+      console.error('nearbyTowns retry failed', e);
+      updateTowns(idx, 'ERROR');
+    }
+  }
+
+  async function retryAmenitiesSearch(idx){
+    const wp = legDataCache[idx];
+    if (!wp) return;
+    const el = document.getElementById('amenities'+idx);
+    if (el) el.innerHTML = '<span class="towns-loading">searching…</span>';
+    const radiusMeters = parseInt(radiusInput.value, 10);
+    const filters = amenityFilterState();
+    try {
+      const amenities = await nearbyAmenities(wp.lat, wp.lon, radiusMeters, filters);
+      updateAmenities(idx, amenities);
+    } catch(e){
+      console.error('nearbyAmenities retry failed', e);
+      updateAmenities(idx, 'ERROR');
+    }
+  }
+
+  async function retryStationSearch(idx){
+    const row = lastFuelStopRows[idx];
+    if (!row) return;
+    row.stations = null;
+    renderFuelStopRows();
+    const amenityTag = fuelTypeInput.value === 'electric' ? 'charging_station' : 'fuel';
+    try {
+      const stations = await stationsNear(row.lat, row.lon, amenityTag, STATION_SEARCH_RADIUS_METERS, STATION_OPTIONS_PER_STOP);
+      row.stations = stations;
+      stations.forEach(s => drawStationMarker(s.lat, s.lon, s.name));
+    } catch(e){
+      console.error('stationsNear retry failed', e);
+      row.stations = 'ERROR';
+    }
+    renderFuelStopRows();
+  }
+
+  resultsArea.addEventListener('click', e=>{
+    const btn = e.target.closest('.retry-btn');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.idx, 10);
+    if (btn.dataset.retry === 'towns') retryTownsSearch(idx);
+    else if (btn.dataset.retry === 'amenities') retryAmenitiesSearch(idx);
+    else if (btn.dataset.retry === 'fuel') retryStationSearch(idx);
+  });
 
   const unitSwitch = $('unitSwitch');
   const radiusInput = $('radiusInput');
