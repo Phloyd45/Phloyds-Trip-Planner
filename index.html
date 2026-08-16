@@ -651,6 +651,7 @@
   }
   .fuel-row input.price-input:focus{outline:none;box-shadow:0 0 0 2px var(--amber);}
   .fuel-subtotal{font-weight:600;}
+  .toll-basis{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-soft);}
   .fuel-total-row{
     display:flex;
     justify-content:space-between;
@@ -960,6 +961,21 @@
       </div>
     </div>
 
+    <div class="fuel-section">
+      <div class="map-title-row">
+        <span class="map-title">Toll cost estimate</span>
+      </div>
+      <div class="fuel-outer" id="tollOuter">
+        <div class="fuel-placeholder" id="tollPlaceholder">
+          Calculate a route first — this fills in with a rough toll estimate for each country you'll cross.
+        </div>
+        <div id="tollTable"></div>
+      </div>
+      <div class="fuel-footnote">
+        Rough averages, not a live tolling feed — motorway tolls are estimated per km driven in that country, vignette countries (e.g. Switzerland, Austria) show a flat trip charge, and countries that are mostly toll-free default to £0. Edit any row to match a route you know, or zero one out if you're avoiding toll roads — this tool doesn't know which specific roads your route uses, only which countries it passes through.
+      </div>
+    </div>
+
     <div class="footnote">
       Routing via OSRM · Geocoding &amp; nearby towns via OpenStreetMap Nominatim and Overpass. Driving times are engine estimates (no traffic, stops or borders factored in) — treat them as a planning starting point.
     </div>
@@ -1213,6 +1229,8 @@
     fuelRangeControls.style.display = 'none';
     stationList.innerHTML = '';
     stationStatus.textContent = '';
+    tollPlaceholder.style.display = 'block';
+    tollTable.innerHTML = '';
 
     try {
       async function resolve(text, cached, label){
@@ -1312,6 +1330,7 @@
         lastFuelLegs.push({ distMeters: to.dist-from.dist, countryCode: to.countryCode||'', countryName: to.countryName||'' });
       }
       renderFuelSection();
+      renderTollSection();
       fuelRangeControls.style.display = 'flex';
       refreshRangeLabel();
 
@@ -1534,8 +1553,94 @@
   }
 
   fuelTypeInput.addEventListener('change', renderFuelSection);
-  currencyInput.addEventListener('change', renderFuelSection);
+  currencyInput.addEventListener('change', ()=>{ renderFuelSection(); renderTollSection(); });
   efficiencyInput.addEventListener('input', ()=>{ efficiencyInput.dataset.userSet = '1'; recomputeFuelTotals(); });
+
+  /* ---------- Toll cost estimate ---------- */
+  // Rough, editable ballpark figures in GBP — not a live tolling feed. Real toll roads vary by
+  // specific route (many motorways have free alternatives), so these are per-km/flat averages for
+  // "if your route uses toll roads in this country", meant as an editable starting point like the
+  // fuel prices above, not a routed toll calculation.
+  const TOLL_DEFAULTS = {
+    fr:{name:'France',      perKm:0.095},
+    es:{name:'Spain',       perKm:0.06},
+    it:{name:'Italy',       perKm:0.075},
+    pt:{name:'Portugal',    perKm:0.06},
+    pl:{name:'Poland',      perKm:0.02},
+    ie:{name:'Ireland',     perKm:0.03},
+    at:{name:'Austria',     vignette:9.5},
+    ch:{name:'Switzerland', vignette:35},
+    cz:{name:'Czechia',     vignette:13},
+    sk:{name:'Slovakia',    vignette:12},
+    si:{name:'Slovenia',    vignette:16},
+    hu:{name:'Hungary',     vignette:11},
+    ro:{name:'Romania',     vignette:3},
+    bg:{name:'Bulgaria',    vignette:9},
+    gb:{name:'United Kingdom', flat:0},
+    de:{name:'Germany',     flat:0},
+    nl:{name:'Netherlands', flat:0},
+    be:{name:'Belgium',     flat:0},
+    se:{name:'Sweden',      flat:0},
+    dk:{name:'Denmark',     flat:0},
+    no:{name:'Norway',      perKm:0.02},
+    us:{name:'United States', flat:0},
+    ca:{name:'Canada',      flat:0}
+  };
+
+  const tollPlaceholder = $('tollPlaceholder'), tollTable = $('tollTable');
+
+  function tollBasisAndDefault(code, distMeters, currency){
+    const def = TOLL_DEFAULTS[code];
+    const km = distMeters/1000;
+    const rate = CURRENCY_RATES[currency];
+    if (!def) return { basisLabel:'unknown — edit if needed', defaultCost:0 };
+    if (def.vignette != null) return { basisLabel:'vignette (flat, per trip)', defaultCost: def.vignette*rate };
+    if (def.perKm) return { basisLabel: CURRENCY_SYMBOLS[currency]+(def.perKm*rate).toFixed(3)+'/km avg', defaultCost: def.perKm*km*rate };
+    return { basisLabel:'mostly toll-free', defaultCost:0 };
+  }
+
+  function renderTollSection(){
+    if (!lastFuelLegs.length) return;
+    tollPlaceholder.style.display = 'none';
+
+    const currency = currencyInput.value;
+    const symbol = CURRENCY_SYMBOLS[currency];
+    const rows = fuelRowsFromLegs(); // same per-country distance grouping used for fuel
+
+    let html = `<div class="fuel-row head"><div>Country</div><div>Distance</div><div>Basis</div><div></div><div>Cost</div></div>`;
+    rows.forEach(r=>{
+      const { basisLabel, defaultCost } = tollBasisAndDefault(r.code, r.distMeters, currency);
+      html += `
+        <div class="fuel-row" data-dist="${r.distMeters}">
+          <div class="country-name">${r.name}</div>
+          <div class="dist-cell">${fmtDist(r.distMeters)}</div>
+          <div class="toll-basis">${basisLabel}</div>
+          <div></div>
+          <div>${symbol} <input type="number" class="price-input toll-cost-input" value="${defaultCost.toFixed(2)}" min="0" step="0.01"></div>
+        </div>`;
+    });
+    tollTable.innerHTML = html;
+    tollTable.querySelectorAll('.toll-cost-input').forEach(inp=> inp.addEventListener('input', recomputeTollTotal));
+    recomputeTollTotal();
+  }
+
+  function recomputeTollTotal(){
+    if (!lastFuelLegs.length) return;
+    const currency = currencyInput.value;
+    const symbol = CURRENCY_SYMBOLS[currency];
+    let total = 0;
+    tollTable.querySelectorAll('.toll-cost-input').forEach(inp=>{ total += parseFloat(inp.value) || 0; });
+
+    let totalEl = document.getElementById('tollGrandTotal');
+    if (!totalEl){
+      const wrap = document.createElement('div');
+      wrap.className = 'fuel-total-row';
+      wrap.innerHTML = `<span class="fuel-total-label">Estimated total tolls</span><span class="fuel-total-value" id="tollGrandTotal"></span>`;
+      tollTable.appendChild(wrap);
+      totalEl = document.getElementById('tollGrandTotal');
+    }
+    totalEl.textContent = symbol + total.toFixed(2);
+  }
 
   /* ---------- Map ---------- */
   let leafletMap = null;
