@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Phloyd's Trip Planner</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAMAAAD04JH5AAAAYFBMVEVwDA3YNDTQQkP5/Px/f3/sPkHJj4+4o6iwBgC28fHPPT1/AAC+d3fMPkJ///+/P38AAAD8Q0TUMzTjOjpQAQLqQT6/Pz/NSEiqVVXeZ2j/AADOSEnMV1ieHh/LV1jILS4J9L2UAAAAIHRSTlP/NNIBAvoUDgMG2AIVuwQEAP/+/v//BHoDHQGfWP82/v6BXcwAAARJSURBVHja7ZvZlqMgEIZt107SM4NUTKQw8f3fclDcV7RB+szIXcfTqS9/gUAtDrE8nBNg+TGmg8G6Dz0mP/MsKOCzB3ZZHnspFgGQsI/BKBXwpXEvZG/xCWOhJyE83QAP8gQ6GCH5U1hnGefX5sMr51lYMDDzABmW1intPxF/lQyfvmEAeBLG6QirGlwowNCsAu68+UKHAiHVDABxPaASWxqD5kECDRMEPBL/Zwggbn9qPBxJA+Yy8olmAcbmBUCcNAyZWKlmAGDOvLBejgqQXwgzBTBpviWAiiBSJdgKkMTLAJUI4EaKXtgGsDQaAukn94J4KEBrX65J4GqrUb8CsI3ADABUqzG15IIKIIgUpoE+BcYSCCcwCwrIaSg1YJiaBGi2IEi69ptpWEjwaQ6gvyknU5NASLA6D/cCjM4E0LMPVFWCnQBTp5EJgEIC3wSA/PL85Tj3u+O88lYEgD7Ac+1ttAugMn9vRoUAI/vUJTf9AOU3d8yXCNILI4BVH+wAgAn7Q4J2bmYrPtgBMGm/IoBkCLC2DrYDFF+e3ydGXp2V+y64eqgZYEaAWoIRQUQ8rQCQzwgwJwFb3pG2A8wJ0Jegc5nUDFB8pzMN4LQAVHkZmAd4GgC4z4yfAZAcALDoAtsAo1ehbgC1ZdiN6dgGeC+fyva9ip2VVdgFWNmPdW9Gw/04pxeCR27Ho83oF0G7B5Kn/gPJwpEMpo5kqXaAQHq3MxOdfHgsbgAu+l3QHMtf9bH8RWftr95MvnsxyfP+3Wjog9UYgbarGe3eixoAESk66HIKcc8+KB7K9V3P40kAuh4j+W6AIqgDtZIAegQKAugO0fQVcBWCREYBVMJkhgCUY1Ta44RdB4TokYMV6C0BppS70axAx35mI1bc2hfb8AexA1DuEKqxcu2R0lp/ThANASymjCrzQbYeIf3OxQSCiZxZJ3GnOv/234woLOQNKf/akrncB1AyBMF4XxS5omxb7nY3QJO/hX7uOCLoE+MA0+lrcMvsufb0/RiA82CcN6duUT+A25L3OwEYCTPuSg9IOVyeFb+cbS1f2AnwLn9myLLsWYyMhUZrSCYAyFe/iEaUbjx8QshxAMVC8xh7lIOlnqE6omUAYr6SagIg+O8B4hPgBDgBToAT4EcAsBPgvwc4V8HpgmMBcssAud05wO26gJGsjDkN0xSM+Af1mODFHZRSKweh9QA8pAT9GpqAHQeA6F17EiiWSerrsqlaHPozANMD+4ww6hbU6xdgtc9IzIJWAtD9ElAA8DBsJajC0OTQXjP5MqJNbCDb1EGiAcBHVksgc7E3cnC3HaslMCKACkAtQYFx/X07vt8wrSRQzMUaAJASlCUxEaKFjkshgWqZsikARmWhRKhdALWOS5QSgAEB1ABSuStTpWSwkZ5TJC5Q9WSkfoAU3y51GfrW+o5RZAgigsRe4/OtpLDZee2nePae/5sAfwF80zLBhBFqEwAAAABJRU5ErkJggg==">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -3417,38 +3418,44 @@
     bcResults.innerHTML = `<div class="bc-results-wrap">${html}</div>`;
   }
 
-  async function exploreBaseCamp(){
-    const q = bcBaseInput.value.trim();
-    if (!q){ bcSetStatus('Enter a base camp location first.', 'err'); return; }
-    const minutes = parseInt(bcTimeInput.value, 10);
+  // The reachable area (OSRM) and the places inside it (Overpass) are separate services with very
+  // different reliability — the free Overpass endpoints routinely return 429/504 under load. Keeping
+  // the two phases apart means a failed place lookup can be retried on its own without re-probing
+  // the isochrone, and the mapped area stays on screen instead of being thrown away.
+  let bcLastBase = null, bcLastRing = null, bcLastMinutes = null;
+
+  function bcPlacesErrorHtml(err){
+    const msg = (err && err.message) || '';
+    const busy = /\b(429|50\d)\b|timeout|unavailable/i.test(msg);
+    const explain = busy
+      ? "OpenStreetMap's free lookup service is busy or rate-limiting right now. The reachable area above is still valid — this only affects the places inside it."
+      : (msg || 'Something went wrong.');
+    return `<div class="empty-state">
+      <span class="big">Couldn't load places</span>
+      ${explain}
+      <button type="button" class="secondary-btn" id="bcRetryPlaces" style="margin-top:12px;">↻ Retry search</button>
+    </div>`;
+  }
+
+  async function bcFindPlaces(){
+    const base = bcLastBase, ring = bcLastRing, minutes = bcLastMinutes;
+    if (!base || !ring) return;
+
     const cats = bcSelectedCats();
-    const anyCat = BC_CAT_ORDER.some(c=>cats[c]);
+    if (!BC_CAT_ORDER.some(c=>cats[c])){
+      bcRenderResults([], base, minutes);
+      bcSetStatus('Reachable area mapped — tick a category to fill it with places.', 'ok');
+      return;
+    }
+    if (isFileProtocol){
+      bcRenderResults([], base, minutes);
+      bcSetStatus('Area mapped, but finding places needs the page served over http(s) — see the notice on the Road Trip tab.', 'err');
+      return;
+    }
 
     bcExploreBtn.disabled = true;
+    bcSetStatus('Finding places inside that area…');
     try {
-      let base = bcAcState.coords;
-      if (!base){
-        bcSetStatus('Locating ' + q + '…');
-        const g = await geocode(q);
-        base = { lat:g.lat, lon:g.lon, label:g.label };
-      }
-
-      bcSetStatus(`Measuring how far you can drive in ${minutes} minutes…`);
-      const ring = await buildIsochrone(base, minutes);
-      bcDrawIsochrone(base, ring, minutes);
-
-      if (!anyCat){
-        bcRenderResults([], base, minutes);
-        bcSetStatus('Reachable area mapped — tick a category to fill it with places.', 'ok');
-        return;
-      }
-      if (isFileProtocol){
-        bcRenderResults([], base, minutes);
-        bcSetStatus('Area mapped, but finding places needs the page served over http(s) — see the notice on the Road Trip tab.', 'err');
-        return;
-      }
-
-      bcSetStatus('Finding places inside that area…');
       const reachKm = ring.reduce((max,p)=> Math.max(max, haversine(base.lat, base.lon, p.lat, p.lon)), 0);
       const radius = Math.round(Math.max(reachKm*1000, 1000));
       const data = await overpassQuery(bcOverpassQuery(base.lat, base.lon, radius, cats));
@@ -3474,17 +3481,49 @@
 
       bcRenderResults(pois, base, minutes);
       pois.forEach(bcDrawPoiMarker);
-      bcSetStatus(`Done — ${pois.length} place${pois.length===1?'':'s'} within ${minutes} minutes of ${base.label || q}.`, 'ok');
+      bcSetStatus(`Done — ${pois.length} place${pois.length===1?'':'s'} within ${minutes} minutes of ${base.label || 'your base'}.`, 'ok');
     } catch(err){
-      console.error('exploreBaseCamp failed', err);
-      bcSetStatus(err.message || 'Something went wrong.', 'err');
+      console.error('bcFindPlaces failed', err);
+      bcResults.innerHTML = bcPlacesErrorHtml(err);
+      bcSetStatus("Couldn't load places — the free map-data service is busy. Try again in a moment.", 'err');
     } finally {
       bcExploreBtn.disabled = false;
     }
   }
 
+  async function exploreBaseCamp(){
+    const q = bcBaseInput.value.trim();
+    if (!q){ bcSetStatus('Enter a base camp location first.', 'err'); return; }
+    const minutes = parseInt(bcTimeInput.value, 10);
+
+    bcExploreBtn.disabled = true;
+    try {
+      let base = bcAcState.coords;
+      if (!base){
+        bcSetStatus('Locating ' + q + '…');
+        const g = await geocode(q);
+        base = { lat:g.lat, lon:g.lon, label:g.label };
+      }
+
+      bcSetStatus(`Measuring how far you can drive in ${minutes} minutes…`);
+      const ring = await buildIsochrone(base, minutes);
+      bcDrawIsochrone(base, ring, minutes);
+      bcLastBase = base; bcLastRing = ring; bcLastMinutes = minutes;
+    } catch(err){
+      console.error('exploreBaseCamp failed', err);
+      bcSetStatus(err.message || 'Something went wrong.', 'err');
+      bcExploreBtn.disabled = false;
+      return;
+    }
+    bcExploreBtn.disabled = false;
+    await bcFindPlaces();
+  }
+
   bcExploreBtn.addEventListener('click', exploreBaseCamp);
   bcResults.addEventListener('click', e=>{
+    // retries only the Overpass half — the isochrone is already on the map and still valid
+    if (e.target.closest('#bcRetryPlaces')){ bcFindPlaces(); return; }
+
     const chip = e.target.closest('.bc-chip');
     if (!chip) return;
     const lat = parseFloat(chip.dataset.lat), lon = parseFloat(chip.dataset.lon);
