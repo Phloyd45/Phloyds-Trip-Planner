@@ -654,7 +654,7 @@
     height:420px;
     background:var(--white);
   }
-  #mapCanvas, #bcMapCanvas{width:100%;height:100%;}
+  #mapCanvas, #bcMapCanvas, #cpMapCanvas{width:100%;height:100%;}
   .map-placeholder{
     position:absolute;
     inset:0;
@@ -855,6 +855,61 @@
   }
   .footnote a{color:var(--road);}
 
+  /* ---------- Circular Planner ---------- */
+  .cp-duration{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:8px 16px;
+    padding:9px 12px;
+  }
+  .cp-duration label{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+  }
+  .cp-duration input{
+    width:64px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;
+    border:1px solid var(--grid-strong);
+    border-radius:3px;
+    padding:5px 7px;
+    background:var(--white);
+    color:var(--ink);
+  }
+  .cp-duration input:focus{outline:none;box-shadow:0 0 0 2px var(--amber);}
+  .cp-target{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--band);
+  }
+  /* five columns here rather than the road trip's seven — a loop leg has no rest or towns cell */
+  #cpResults .results-head,
+  #cpResults .leg-row,
+  #cpResults .totals-row{
+    grid-template-columns:64px 1.2fr 1.2fr 110px 120px;
+  }
+  .cp-verdict{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    padding:10px 14px;
+    border:1px solid var(--grid-strong);
+    border-top:none;
+    background:#F8F7F2;
+    color:var(--ink-soft);
+  }
+  .cp-verdict strong{color:var(--band);}
+  .cp-verdict .warn{color:var(--danger);}
+  @media (max-width:820px){
+    #cpResults .results-head,
+    #cpResults .leg-row,
+    #cpResults .totals-row{grid-template-columns:44px 1fr 1fr;}
+  }
+
   /* ---------- Base Camp ---------- */
   .bc-results-wrap{
     border:1px solid var(--grid-strong);
@@ -958,6 +1013,7 @@
       <span class="dot"></span><span class="tab-label" id="tabRoadtripLabel" spellcheck="false">Road Trip</span>
     </button>
     <button class="tab" id="tabSingle" type="button" title="Explore outwards from one base">Base Camp</button>
+    <button class="tab" id="tabCircular" type="button" title="Plan a loop that finishes where it started">Circular Planner</button>
   </div>
 </div>
 
@@ -1251,6 +1307,80 @@
 
     <div class="footnote">
       The shaded area is a drive-time estimate probed outward from your base along 16 compass directions via OSRM — a good approximation of how far you can get, not a guarantee. Places come from OpenStreetMap and only show up if someone has tagged them there, so a genuinely quiet area and an under-mapped one look the same.
+    </div>
+  </div>
+
+  <div id="circularPanel" style="display:none;">
+
+    <div class="input-grid">
+      <div class="rowhead">1</div>
+      <div class="label-cell">Start / finish (C1)</div>
+      <div class="input-cell"><div class="autocomplete-wrap">
+        <input type="text" id="cpBaseInput" placeholder="e.g. York, UK" autocomplete="off">
+        <div class="ac-list" id="cpBaseAcList"></div>
+      </div></div>
+
+      <div class="rowhead">2</div>
+      <div class="label-cell">Driving time (C2)</div>
+      <div class="input-cell">
+        <div class="cp-duration">
+          <label>Days <input type="number" id="cpDays" value="0" min="0" max="14" step="1"></label>
+          <label>Hours <input type="number" id="cpHours" value="8" min="0" max="23" step="1"></label>
+          <label>Minutes <input type="number" id="cpMins" value="0" min="0" max="59" step="5"></label>
+          <span class="cp-target" id="cpTargetHint"></span>
+        </div>
+      </div>
+
+      <div class="rowhead">3</div>
+      <div class="label-cell">Stops on loop (C3)</div>
+      <div class="input-cell">
+        <select id="cpStops">
+          <option value="3">3 stops</option>
+          <option value="4" selected>4 stops</option>
+          <option value="5">5 stops</option>
+          <option value="6">6 stops</option>
+          <option value="7">7 stops</option>
+          <option value="8">8 stops</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <div class="rowhead">4</div>
+      <div class="label-cell">Run</div>
+      <div class="action-cell">
+        <button id="cpBuildBtn">Build circular route</button>
+        <button id="cpToRoadTripBtn" class="secondary-btn" style="display:none;">→ Open in Road Trip</button>
+        <span class="status-text" id="cpStatus">Enter a start point and a driving time, then build.</span>
+      </div>
+    </div>
+
+    <div id="cpResults">
+      <div class="empty-state">
+        <span class="big">No loop yet</span>
+        Give it a starting point and how long you want to be driving in total — it finds a ring of stops that brings you back where you began, as close to that driving time as it can get.
+      </div>
+    </div>
+
+    <div class="map-section">
+      <div class="map-title-row">
+        <span class="map-title">Loop map</span>
+        <span class="map-legend">
+          <span><span class="legend-dot" style="background:#153D2B;"></span>start / finish</span>
+          <span><span class="legend-dot" style="background:#DD9A2E;"></span>loop stop</span>
+        </span>
+      </div>
+      <div class="map-outer">
+        <div id="cpMapCanvas"></div>
+        <div class="map-placeholder" id="cpMapPlaceholder">
+          <span class="big">Map appears here</span>
+          Build a circular route to see the whole loop drawn, with a pin at every stop along the way.
+        </div>
+      </div>
+    </div>
+
+    <div class="footnote">
+      The loop is found by testing rings of stops around your start and growing or shrinking the ring until the total driving time lands near your target — so treat the stops as a suggested shape for the trip rather than destinations chosen for their own sake. "Open in Road Trip" hands the same loop over to the Road Trip tab, where you get fuel and toll estimates, overnight stops, exports and printing.
     </div>
   </div>
 
@@ -3555,19 +3685,277 @@
     addLocationAsViaStop(lat, lon, btn.dataset.name || 'Stop');
   });
 
-  /* ---------- Tab switching ---------- */
-  function showPanel(which){
-    const road = which === 'road';
-    $('roadtripPanel').style.display = road ? '' : 'none';
-    $('singlePanel').style.display = road ? 'none' : '';
-    $('tabRoadtrip').classList.toggle('active', road);
-    $('tabSingle').classList.toggle('active', !road);
-    // Leaflet can't size a map that was hidden when it was created
-    if (!road && bcMap) setTimeout(bcFitToArea, 60);
-    if (road && leafletMap) setTimeout(()=> leafletMap.invalidateSize(), 60);
+  /* ---------- Circular Planner ---------- */
+  const cpBaseInput = $('cpBaseInput'), cpDays = $('cpDays'), cpHours = $('cpHours'), cpMins = $('cpMins'),
+        cpStopsInput = $('cpStops'), cpBuildBtn = $('cpBuildBtn'), cpToRoadTripBtn = $('cpToRoadTripBtn'),
+        cpStatus = $('cpStatus'), cpResults = $('cpResults'), cpTargetHint = $('cpTargetHint');
+
+  const cpAcState = { list: $('cpBaseAcList'), input: cpBaseInput, results:[], hl:-1, coords:null, debounce:null };
+  cpAcState.onEnter = ()=> buildCircularRoute();
+  wireAutocomplete(cpAcState);
+
+  let cpMap = null, cpLayers = [], cpLastLoop = null, cpLastLine = null;
+
+  function cpEnsureMap(){
+    if (cpMap) return cpMap;
+    cpMap = L.map('cpMapCanvas', { scrollWheelZoom:true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(cpMap);
+    cpMap.setView([54.5,-3], 6);
+    return cpMap;
   }
-  $('tabRoadtrip').addEventListener('click', ()=> showPanel('road'));
-  $('tabSingle').addEventListener('click', ()=> showPanel('base'));
+
+  function cpSetStatus(msg, kind){
+    cpStatus.textContent = msg;
+    cpStatus.className = 'status-text' + (kind ? ' '+kind : '');
+  }
+
+  function cpTargetSeconds(){
+    const d = parseInt(cpDays.value,10)||0, h = parseInt(cpHours.value,10)||0, m = parseInt(cpMins.value,10)||0;
+    return d*86400 + h*3600 + m*60;
+  }
+
+  function cpRefreshTargetHint(){
+    const t = cpTargetSeconds();
+    if (t <= 0){ cpTargetHint.textContent = ''; return; }
+    const stops = parseInt(cpStopsInput.value,10);
+    cpTargetHint.textContent = `target ${fmtHours(t)} driving · ≈ ${fmtHours(t/(stops+1))} per leg`;
+  }
+  [cpDays, cpHours, cpMins, cpStopsInput].forEach(el=> el.addEventListener('input', cpRefreshTargetHint));
+  cpStopsInput.addEventListener('change', cpRefreshTargetHint);
+  cpRefreshTargetHint();
+
+  const CP_MAX_SNAP_METERS = 20000; // a ring point that snapped further than this isn't on a usable road
+
+  const CP_COMPASS = ['N','NE','E','SE','S','SW','W','NW'];
+  function cpCompass(bearingDeg){
+    return CP_COMPASS[Math.round(((bearingDeg%360)+360)%360 / 45) % 8];
+  }
+
+  function cpRingPoints(base, radiusKm, n){
+    const pts = [];
+    for (let i=0;i<n;i++) pts.push(destPoint(base.lat, base.lon, i*(360/n), radiusKm));
+    return pts;
+  }
+
+  // One table request prices an entire candidate ring, so the radius search costs a handful of
+  // cheap calls instead of a full set of route requests per iteration.
+  async function cpMeasureRing(base, radiusKm, n){
+    const seq = [base].concat(cpRingPoints(base, radiusKm, n));
+    const coords = seq.map(p=>`${p.lon.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
+    const res = await fetch(`${OSRM}/table/v1/driving/${coords}`);
+    if (!res.ok) throw new Error('Routing service unavailable — try again in a moment');
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.durations) throw new Error('Could not measure a loop from there');
+
+    const D = data.durations, dests = data.destinations || [];
+    let total = 0;
+    for (let i=0;i<seq.length;i++){
+      const d = D[i] && D[i][(i+1)%seq.length];
+      if (d == null) return null; // some leg simply isn't drivable
+      total += d;
+    }
+    const snapped = dests.map(x=>({ lat:x.location[1], lon:x.location[0], snap:x.distance }));
+    if (snapped.slice(1).some(s=> s.snap > CP_MAX_SNAP_METERS)) return null;
+    return { total, radiusKm, stops: snapped.slice(1) };
+  }
+
+  // Binary search on ring radius: bigger ring -> longer loop, which is monotonic enough to home in on.
+  async function cpFindRing(base, targetSec, n){
+    const targetHours = targetSec/3600;
+    let lo = 1, hi = Math.min(1500, Math.max(60, targetHours * 25));
+    let best = null;
+    for (let it=0; it<9; it++){
+      const mid = (lo+hi)/2;
+      cpSetStatus(`Sizing the loop… (pass ${it+1} of 9)`);
+      const r = await cpMeasureRing(base, mid, n);
+      if (!r){ hi = mid; continue; } // unusable ring — pull it back in
+      if (!best || Math.abs(r.total-targetSec) < Math.abs(best.total-targetSec)) best = r;
+      if (r.total < targetSec) lo = mid; else hi = mid;
+    }
+    return best;
+  }
+
+  function cpClearLayers(){
+    const map = cpEnsureMap();
+    cpLayers.forEach(l=>map.removeLayer(l));
+    cpLayers = [];
+  }
+
+  function cpDrawLoop(base, stops, coords){
+    const map = cpEnsureMap();
+    $('cpMapPlaceholder').classList.add('hidden');
+    cpClearLayers();
+
+    const line = L.polyline(coords.map(c=>[c[1],c[0]]), { color:'#3B6E8F', weight:4, opacity:0.85 }).addTo(map);
+    cpLayers.push(line);
+
+    const baseMarker = L.circleMarker([base.lat, base.lon], {
+      radius:9, color:'#fff', weight:2, fillColor:'#153D2B', fillOpacity:1
+    }).addTo(map);
+    baseMarker.bindPopup(`<div class="pop-title">Start / finish</div>${base.label || 'Start'}`);
+    cpLayers.push(baseMarker);
+
+    stops.forEach((s,i)=>{
+      const m = L.circleMarker([s.lat, s.lon], {
+        radius:7, color:'#fff', weight:2, fillColor:'#DD9A2E', fillOpacity:1
+      }).addTo(map);
+      m.bindPopup(`<div class="pop-title">Stop ${i+1}</div>${s.label || 'Stop '+(i+1)}`);
+      cpLayers.push(m);
+    });
+
+    cpLastLine = line;
+    cpFitLoop();
+    setTimeout(cpFitLoop, 150);
+  }
+
+  function cpFitLoop(){
+    if (!cpMap || !cpLastLine) return;
+    cpMap.invalidateSize();
+    cpMap.fitBounds(cpLastLine.getBounds(), { padding:[28,28] });
+  }
+
+  function cpRenderResults(loop){
+    const { legs, totalDur, totalDist, targetSec } = loop;
+    let rows = '';
+    legs.forEach((leg,i)=>{
+      rows += `
+        <div class="leg-row">
+          <div class="leg-num">${i+1}</div>
+          <div class="leg-place">${leg.from.label || 'Start'}</div>
+          <div class="leg-place">${leg.to.label || 'Stop'}${mapsLinksHtml(leg.from, leg.to)}</div>
+          <div class="leg-dist">${fmtDist(leg.dist)}</div>
+          <div class="leg-time">${fmtHours(leg.dur)}</div>
+        </div>`;
+    });
+
+    const diff = totalDur - targetSec;
+    const off = Math.abs(diff);
+    const closeEnough = off <= Math.max(600, targetSec*0.05); // within 10 min or 5%
+    const verdict = closeEnough
+      ? `Loop comes to <strong>${fmtHours(totalDur)}</strong> of driving against your ${fmtHours(targetSec)} target — ${off < 60 ? 'bang on' : (diff>0?'about '+fmtHours(off)+' over':'about '+fmtHours(off)+' under')}.`
+      : `Closest loop found is <strong>${fmtHours(totalDur)}</strong> of driving, <span class="warn">${fmtHours(off)} ${diff>0?'over':'under'}</span> your ${fmtHours(targetSec)} target. Roads around the start may not allow a neat ring at that size — try a different number of stops or a nearby start point.`;
+
+    cpResults.innerHTML = `
+      <div class="results-head">
+        <div>Leg</div><div>From</div><div>To</div><div>Distance</div><div>Drive time</div>
+      </div>
+      <div class="results-body">${rows}</div>
+      <div class="totals-row">
+        <div></div><div>Total</div><div></div><div>${fmtDist(totalDist)}</div><div>${fmtHours(totalDur)}</div>
+      </div>
+      <div class="cp-verdict">${verdict}</div>`;
+  }
+
+  async function buildCircularRoute(){
+    const q = cpBaseInput.value.trim();
+    if (!q){ cpSetStatus('Enter a start point first.', 'err'); return; }
+    const targetSec = cpTargetSeconds();
+    if (targetSec < 900){ cpSetStatus('Set a driving time of at least 15 minutes.', 'err'); return; }
+    const n = parseInt(cpStopsInput.value, 10);
+
+    cpBuildBtn.disabled = true;
+    cpToRoadTripBtn.style.display = 'none';
+    try {
+      let base = cpAcState.coords;
+      if (!base){
+        cpSetStatus('Locating ' + q + '…');
+        const g = await geocode(q);
+        base = { lat:g.lat, lon:g.lon, label:g.label };
+      }
+      base = { lat:base.lat, lon:base.lon, label:base.label || q };
+
+      const ring = await cpFindRing(base, targetSec, n);
+      if (!ring) throw new Error("Couldn't find a drivable loop from there — try fewer stops or a start point nearer a road network.");
+
+      cpSetStatus('Naming the stops…');
+      const stops = [];
+      for (let i=0;i<ring.stops.length;i++){
+        const s = ring.stops[i];
+        let label = 'Stop ' + (i+1);
+        try {
+          const rg = await reverseGeocode(s.lat, s.lon);
+          if (rg.name) label = rg.name;
+        } catch(e){ /* keep the generic label — the stop is still usable */ }
+        stops.push({ lat:s.lat, lon:s.lon, label, bearing: i*(360/ring.stops.length) });
+        await sleep(1100); // Nominatim politeness, same as the road trip planner
+      }
+
+      // Rural ring points often reverse-geocode to the same county name, leaving two stops on
+      // opposite sides of the loop indistinguishable. Where a name repeats, tag every instance of
+      // it with the compass direction it sits in from the start — which is how the ring was laid out.
+      const counts = stops.reduce((acc,s)=>{ acc[s.label] = (acc[s.label]||0)+1; return acc; }, {});
+      stops.forEach(s=>{ if (counts[s.label] > 1) s.label += ` (${cpCompass(s.bearing)})`; });
+
+      cpSetStatus('Drawing the loop…');
+      const seq = [base].concat(stops);
+      const legs = [], allCoords = [];
+      let totalDur = 0, totalDist = 0;
+      for (let i=0;i<seq.length;i++){
+        const from = seq[i], to = seq[(i+1)%seq.length];
+        const route = await getRoute(from, to);
+        legs.push({ from, to, dur: route.duration, dist: route.distance });
+        totalDur += route.duration;
+        totalDist += route.distance;
+        allCoords.push(...route.geometry.coordinates);
+      }
+
+      cpLastLoop = { base, stops, legs, totalDur, totalDist, targetSec, coords: allCoords };
+      cpDrawLoop(base, stops, allCoords);
+      cpRenderResults(cpLastLoop);
+      cpToRoadTripBtn.style.display = '';
+      cpSetStatus(`Done — ${legs.length} legs, ${fmtDist(totalDist)}, ${fmtHours(totalDur)} driving.`, 'ok');
+    } catch(err){
+      console.error('buildCircularRoute failed', err);
+      cpSetStatus(err.message || 'Something went wrong.', 'err');
+    } finally {
+      cpBuildBtn.disabled = false;
+    }
+  }
+
+  // Hands the finished loop to the Road Trip tab as start + vias + finish, which gives it the
+  // full trip-sheet treatment (fuel, tolls, overnight stops, exports) without duplicating any of it.
+  function cpSendToRoadTrip(){
+    if (!cpLastLoop) return;
+    const { base, stops } = cpLastLoop;
+    clearAllViaRows();
+    startInput.value = base.label;
+    acState.start.coords = { lat:base.lat, lon:base.lon, label:base.label };
+    endInput.value = base.label;
+    acState.end.coords = { lat:base.lat, lon:base.lon, label:base.label };
+    stops.forEach(s=> addViaRow({ lat:s.lat, lon:s.lon, label:s.label }));
+    showPanel('road');
+    setStatus('Loop handed over from the Circular Planner — recalculating…');
+    run();
+  }
+
+  cpBuildBtn.addEventListener('click', buildCircularRoute);
+  cpToRoadTripBtn.addEventListener('click', cpSendToRoadTrip);
+
+  /* ---------- Tab switching ---------- */
+  const PANELS = {
+    road:     { panel:'roadtripPanel', tab:'tabRoadtrip' },
+    base:     { panel:'singlePanel',   tab:'tabSingle' },
+    circular: { panel:'circularPanel', tab:'tabCircular' }
+  };
+
+  function showPanel(which){
+    if (!PANELS[which]) which = 'road';
+    Object.keys(PANELS).forEach(key=>{
+      const on = key === which;
+      $(PANELS[key].panel).style.display = on ? '' : 'none';
+      $(PANELS[key].tab).classList.toggle('active', on);
+    });
+    // Leaflet can't size a map that was hidden when it was created
+    if (which === 'base' && bcMap) setTimeout(bcFitToArea, 60);
+    if (which === 'circular' && cpMap) setTimeout(cpFitLoop, 60);
+    if (which === 'road' && leafletMap) setTimeout(()=> leafletMap.invalidateSize(), 60);
+  }
+  Object.keys(PANELS).forEach(key=>{
+    $(PANELS[key].tab).addEventListener('click', ()=> showPanel(key));
+  });
 
   /* ---------- Auto-save to localStorage ---------- */
   const STORAGE_KEY = 'phloyds-trip-planner-v1';
@@ -3587,7 +3975,13 @@
             minutes: bcTimeInput.value,
             cats: bcSelectedCats()
           },
-          tab: $('tabSingle').classList.contains('active') ? 'base' : 'road'
+          circular: {
+            text: cpBaseInput.value.trim(),
+            coords: cpAcState.coords,
+            days: cpDays.value, hours: cpHours.value, mins: cpMins.value,
+            stops: cpStopsInput.value
+          },
+          tab: Object.keys(PANELS).find(k=> $(PANELS[k].tab).classList.contains('active')) || 'road'
         }));
       } catch(e){
         // private browsing, or storage full — auto-save is a convenience and must never break the app
@@ -3615,9 +4009,18 @@
       $('bcOutdoors').checked   = !!bc.cats.outdoors;
     }
 
+    const cp = saved.circular || {};
+    if (cp.text) cpBaseInput.value = cp.text;
+    if (cp.coords) cpAcState.coords = cp.coords;
+    if (cp.days !== undefined) cpDays.value = cp.days;
+    if (cp.hours !== undefined) cpHours.value = cp.hours;
+    if (cp.mins !== undefined) cpMins.value = cp.mins;
+    if (cp.stops) cpStopsInput.value = cp.stops;
+    cpRefreshTargetHint();
+
     const r = saved.route;
     if ((r.start && r.start.text) || (r.end && r.end.text)) applyLoadedRoute(r, { skipRun:true });
-    if (saved.tab === 'base') showPanel('base');
+    if (saved.tab && saved.tab !== 'road') showPanel(saved.tab);
   }
 
   // Delegated so controls that only exist later — via rows, fuel/toll price cells, booking times —
