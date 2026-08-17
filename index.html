@@ -524,6 +524,53 @@
   }
   .retry-btn:hover{background:#F5D6CF;}
 
+  .booked-toggle{
+    width:100%;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .booked-toggle input{cursor:pointer;}
+  .booking-fields{
+    width:100%;
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:6px 14px;
+  }
+  .booking-time{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+  }
+  .booking-time input{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    border:1px solid var(--grid-strong);
+    border-radius:3px;
+    padding:3px 6px;
+    background:var(--white);
+    color:var(--ink);
+  }
+  .booking-time input:focus{outline:none;box-shadow:0 0 0 2px var(--amber);}
+  .depart-note{
+    width:100%;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    line-height:1.55;
+    color:var(--band);
+  }
+  .depart-note .warn{color:var(--danger);}
+  .depart-note .muted{color:var(--ink-soft);}
+  .discovery-block{width:100%;display:flex;flex-wrap:wrap;gap:6px;}
+
   .totals-row{
     display:grid;
     grid-template-columns:64px 1.15fr 1.15fr 95px 110px 130px 1.6fr;
@@ -847,7 +894,7 @@
     .print-only{display:block;}
     .topband, .file-protocol-notice, .input-grid, .action-row, .map-section,
     .fuel-controls, .fuel-range-controls, .leg-map-links, .footnote, .fuel-footnote,
-    .via-remove-btn, .popup-add-btn{
+    .via-remove-btn, .popup-add-btn, .booked-toggle, .retry-btn{
       display:none !important;
     }
     body, .sheet-wrap{background:#fff;}
@@ -1557,6 +1604,7 @@
       for (let i=0;i<globalWaypoints.length;i++){
         const wp = globalWaypoints[i];
         if (wp.type==='auto'){
+          if (bookingFor(wp)) continue; // already-booked stop — its discovery block is hidden, so don't spend lookups on it
           if (isFileProtocol){
             updateTowns(i, 'ERROR');
             if (wantAmenities) updateAmenities(i, 'ERROR');
@@ -1594,6 +1642,7 @@
         }
       }
 
+      recomputeDepartureNotes(); // stop labels are resolved by now, so the notes can name the next stop
       setStatus(`Done — ${totalLegs} leg${totalLegs>1?'s':''}, ${fmtDist(totalDistance)} total${doneSuffix}.`, 'ok');
 
     } catch(err){
@@ -1612,6 +1661,10 @@
   let lastMandatoryStops = []; // [{lat,lon,label}] — start, vias, end in route order, for exports
   let lastRouteCoords = []; // full route polyline as [lon,lat] pairs, for GPX/KML track export
   let lastFuelStopRows = []; // [{legIndex, stations, distFromLegStart, timeFromLegStart, timeToLegEnd}] — rendered as rows in the results table
+  // Accommodation the user has already booked, keyed by rounded stop coordinates rather than
+  // waypoint index: a recalculated route that lands on the same stops keeps its bookings, while
+  // one that reshapes the route drops them instead of silently reattaching them to a different place.
+  let bookings = {}; // "lat,lon" -> {checkIn:'HH:MM', checkOut:'HH:MM'} — presence means "booked"
 
   /* ---------- Fuel cost estimate ---------- */
   const FUEL_DEFAULTS = { // approx. avg price per litre in GBP — rough, editable starting points
@@ -2235,12 +2288,117 @@
     activateRegisteredMarker(markerKey('station:', lat, lon), 'Fill-up stop', chip.dataset.name || 'Station');
   });
 
+  /* ---------- Already-booked accommodation ---------- */
+  function bookingKey(wp){
+    return wp.lat.toFixed(3)+','+wp.lon.toFixed(3);
+  }
+  function bookingFor(wp){
+    return wp ? bookings[bookingKey(wp)] : null;
+  }
+
+  function parseClock(str){
+    if (!/^\d{1,2}:\d{2}$/.test(str||'')) return null;
+    const [h,m] = str.split(':').map(Number);
+    if (h>23 || m>59) return null;
+    return h*60+m;
+  }
+  // Formatted via the browser locale so the notes read in the same 12h/24h convention as the
+  // <input type="time"> widgets sitting right next to them.
+  function fmtClock(mins){
+    const m = ((mins%1440)+1440)%1440;
+    return new Date(2000,0,1,Math.floor(m/60),m%60).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+  function fmtMins(mins){
+    const h = Math.floor(mins/60), m = mins%60;
+    if (!h) return m+'m';
+    return m ? h+'h '+m+'m' : h+'h';
+  }
+
+  function bookingControlHtml(wp, idx){
+    const b = bookingFor(wp);
+    const on = !!b;
+    return `
+      <label class="booked-toggle"><input type="checkbox" class="booked-check" data-idx="${idx}"${on?' checked':''}> 🛏️ Accommodation already booked</label>
+      <div class="booking-fields" id="bookingFields${idx}"${on?'':' style="display:none;"'}>
+        <label class="booking-time">Check-in <input type="time" class="booking-in" data-idx="${idx}" value="${b?b.checkIn:''}"></label>
+        <label class="booking-time">Check-out <input type="time" class="booking-out" data-idx="${idx}" value="${b?b.checkOut:''}"></label>
+        <div class="depart-note" id="departNote${idx}"></div>
+      </div>`;
+  }
+
+  // The departure time shown at a booked stop is driven by the NEXT stop's check-in: leave late
+  // enough to not arrive early, early enough to make check-in. Only computable when both ends are booked.
+  function recomputeDepartureNotes(){
+    if (!legDataCache.length || !lastTotals) return;
+    const restSeconds = (lastTotals.restMinutes||0)*60;
+    legDataCache.forEach((wp, idx)=>{
+      const el = document.getElementById('departNote'+idx);
+      if (!el) return;
+      const b = bookingFor(wp);
+      if (!b){ el.innerHTML = ''; return; }
+
+      const next = legDataCache[idx+1];
+      if (!next){ el.innerHTML = '<span class="muted">Final stop — no onward leg.</span>'; return; }
+      const nb = bookingFor(next);
+      const nextCheckIn = nb ? parseClock(nb.checkIn) : null;
+      if (nextCheckIn === null){
+        el.innerHTML = `<span class="muted">Tick the next stop (${next.label||'next stop'}) and set its check-in time to get a departure time.</span>`;
+        return;
+      }
+
+      const travelMins = Math.round(((next.dur - wp.dur) + restSeconds)/60);
+      let departMins = nextCheckIn - travelMins;
+      let daysEarlier = 0;
+      while (departMins < 0){ departMins += 1440; daysEarlier++; }
+
+      const dayNote = daysEarlier===1 ? ' <span class="warn">(the day before)</span>'
+                    : daysEarlier>1 ? ` <span class="warn">(${daysEarlier} days earlier)</span>` : '';
+      let line = `Leave by <strong>${fmtClock(departMins)}</strong>${dayNote} to reach ${next.label||'the next stop'} for ${fmtClock(nextCheckIn)} — ${fmtMins(travelMins)} travel${restSeconds?' incl. rest':''}.`;
+
+      const checkOut = parseClock(b.checkOut);
+      if (checkOut !== null && daysEarlier===0){
+        if (departMins < checkOut){
+          line += ` <span class="warn">Tight — that's before your ${fmtClock(checkOut)} check-out.</span>`;
+        } else {
+          line += ` <span class="muted">${fmtMins(departMins-checkOut)} spare after ${fmtClock(checkOut)} check-out.</span>`;
+        }
+      }
+      el.innerHTML = line;
+    });
+  }
+
+  function toggleBooking(idx, on){
+    const wp = legDataCache[idx];
+    if (!wp) return;
+    const key = bookingKey(wp);
+    if (on) bookings[key] = bookings[key] || { checkIn:'', checkOut:'' };
+    else delete bookings[key];
+
+    const fields = $('bookingFields'+idx), discovery = $('discovery'+idx);
+    if (fields) fields.style.display = on ? '' : 'none';
+    if (discovery) discovery.style.display = on ? 'none' : '';
+
+    // Booked stops skip the town/amenity lookups entirely, so un-ticking one that was never
+    // searched has to kick those off now — otherwise it would sit on "looking nearby…" forever.
+    if (!on && wp.type==='auto' && !isFileProtocol && townsCacheByIndex[idx] === undefined){
+      retryTownsSearch(idx);
+      if (amenityFiltersActive(amenityFilterState())) retryAmenitiesSearch(idx);
+    }
+    recomputeDepartureNotes();
+  }
+
   function townsCellContent(to){
-    if (to.type === 'end') return '<span class="towns-loading">final destination</span>';
-    if (to.type === 'via') return '<span class="towns-loading">your stop</span>';
-    const cached = townsCacheByIndex[to._idx];
-    const townsPart = (cached !== undefined) ? townsHtml(cached, to._idx) : renderTownsPlaceholder();
-    return `<div class="chip-row" id="townList${to._idx}">${townsPart}</div><div class="chip-row" id="amenities${to._idx}"></div>`;
+    const idx = to._idx;
+    const booked = !!bookingFor(to);
+    let inner;
+    if (to.type === 'end') inner = '<span class="towns-loading">final destination</span>';
+    else if (to.type === 'via') inner = '<span class="towns-loading">your stop</span>';
+    else {
+      const cached = townsCacheByIndex[idx];
+      const townsPart = (cached !== undefined) ? townsHtml(cached, idx) : renderTownsPlaceholder();
+      inner = `<div class="chip-row" id="townList${idx}">${townsPart}</div><div class="chip-row" id="amenities${idx}"></div>`;
+    }
+    return `${bookingControlHtml(to, idx)}<div class="discovery-block" id="discovery${idx}"${booked?' style="display:none;"':''}>${inner}</div>`;
   }
 
   function restCellContent(legIndex, numLegs, legDur, restMinutes){
@@ -2295,6 +2453,7 @@
     if (!lastTotals || !legDataCache.length) return;
     renderSkeleton(legDataCache, lastTotals.numLegs, lastTotals.totalDistance, lastTotals.totalDuration, lastTotals.restMinutes);
     renderFuelStopRows();
+    recomputeDepartureNotes();
   }
 
   function updateStopLabel(waypointIndex, label){
@@ -2381,6 +2540,20 @@
     if (btn.dataset.retry === 'towns') retryTownsSearch(idx);
     else if (btn.dataset.retry === 'amenities') retryAmenitiesSearch(idx);
     else if (btn.dataset.retry === 'fuel') retryStationSearch(idx);
+  });
+
+  resultsArea.addEventListener('change', e=>{
+    const cb = e.target.closest('.booked-check');
+    if (!cb) return;
+    toggleBooking(parseInt(cb.dataset.idx, 10), cb.checked);
+  });
+  resultsArea.addEventListener('input', e=>{
+    const inp = e.target.closest('.booking-in, .booking-out');
+    if (!inp) return;
+    const b = bookingFor(legDataCache[parseInt(inp.dataset.idx, 10)]);
+    if (!b) return;
+    if (inp.classList.contains('booking-in')) b.checkIn = inp.value; else b.checkOut = inp.value;
+    recomputeDepartureNotes();
   });
 
   const unitSwitch = $('unitSwitch');
@@ -2707,7 +2880,8 @@
         currency: currencyInput.value,
         range: rangeInput.value
       },
-      amenityFilters: amenityFilterState()
+      amenityFilters: amenityFilterState(),
+      bookings
     };
   }
 
@@ -2826,6 +3000,8 @@
     if (data.prefHours) hoursInput.value = data.prefHours;
     if (data.radiusMeters) radiusInput.value = data.radiusMeters;
     if (data.restMinutes !== undefined) restInput.value = data.restMinutes;
+
+    bookings = (data.bookings && typeof data.bookings === 'object') ? data.bookings : {};
 
     if (data.amenityFilters){
       $('filterHotels').checked = !!data.amenityFilters.hotels;
