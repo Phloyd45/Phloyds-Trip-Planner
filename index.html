@@ -882,6 +882,18 @@
     color:var(--ink);
   }
   .cp-duration input:focus{outline:none;box-shadow:0 0 0 2px var(--amber);}
+  .cp-duration select{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;
+    border:1px solid var(--grid-strong);
+    border-radius:3px;
+    padding:5px 7px;
+    background:var(--white);
+    color:var(--ink);
+    cursor:pointer;
+  }
+  .cp-duration select:focus{outline:none;box-shadow:0 0 0 2px var(--amber);}
+  .cp-sub{display:flex;align-items:center;gap:14px;}
   .cp-target{
     font-family:'IBM Plex Mono',monospace;
     font-size:11px;
@@ -1321,22 +1333,49 @@
       </div></div>
 
       <div class="rowhead">2</div>
-      <div class="label-cell">Driving time (C2)</div>
+      <div class="label-cell">Days away (C2)</div>
       <div class="input-cell">
         <div class="cp-duration">
-          <label>Days <input type="number" id="cpDays" value="0" min="0" max="14" step="1"></label>
-          <label>Hours <input type="number" id="cpHours" value="8" min="0" max="23" step="1"></label>
-          <label>Minutes <input type="number" id="cpMins" value="0" min="0" max="59" step="5"></label>
+          <label><input type="number" id="cpDays" value="5" min="1" max="60" step="1"> days</label>
           <span class="cp-target" id="cpTargetHint"></span>
         </div>
       </div>
 
       <div class="rowhead">3</div>
-      <div class="label-cell">Stops on loop (C3)</div>
+      <div class="label-cell">Each day (C3)</div>
+      <div class="input-cell">
+        <div class="cp-duration">
+          <select id="cpPerDayMode">
+            <option value="time" selected>Driving time per day</option>
+            <option value="distance">Distance per day</option>
+          </select>
+          <span id="cpPerDayTime" class="cp-sub">
+            <label>Hours <input type="number" id="cpHours" value="4" min="0" max="23" step="1"></label>
+            <label>Minutes <input type="number" id="cpMins" value="0" min="0" max="59" step="5"></label>
+          </span>
+          <span id="cpPerDayDist" class="cp-sub" style="display:none;">
+            <label><input type="number" id="cpDist" value="150" min="1" step="10"> <span id="cpDistUnit">mi</span></label>
+          </span>
+        </div>
+      </div>
+
+      <div class="rowhead">4</div>
+      <div class="label-cell">Breaks &amp; visits (C4)</div>
+      <div class="input-cell">
+        <div class="cp-duration">
+          <label>Hours <input type="number" id="cpBreakHours" value="1" min="0" max="12" step="1"></label>
+          <label>Minutes <input type="number" id="cpBreakMins" value="0" min="0" max="59" step="5"></label>
+          <span class="cp-target">stopped per day — rest breaks, lunch, sightseeing</span>
+        </div>
+      </div>
+
+      <div class="rowhead">5</div>
+      <div class="label-cell">Stops on loop (C5)</div>
       <div class="input-cell">
         <select id="cpStops">
+          <option value="auto" selected>Auto — roughly one per day</option>
           <option value="3">3 stops</option>
-          <option value="4" selected>4 stops</option>
+          <option value="4">4 stops</option>
           <option value="5">5 stops</option>
           <option value="6">6 stops</option>
           <option value="7">7 stops</option>
@@ -1346,7 +1385,7 @@
     </div>
 
     <div class="action-row">
-      <div class="rowhead">4</div>
+      <div class="rowhead">6</div>
       <div class="label-cell">Run</div>
       <div class="action-cell">
         <button id="cpBuildBtn">Build circular route</button>
@@ -2832,6 +2871,7 @@
     reRenderForUnits();
     refreshFuelForUnitChange(oldUnit, unitState);
     refreshRangeLabel(oldUnit);
+    cpRefreshForUnitChange(oldUnit);
   });
   updateRadiusLabels(); // reflect the default unit (miles) on first load
 
@@ -3687,6 +3727,8 @@
 
   /* ---------- Circular Planner ---------- */
   const cpBaseInput = $('cpBaseInput'), cpDays = $('cpDays'), cpHours = $('cpHours'), cpMins = $('cpMins'),
+        cpPerDayMode = $('cpPerDayMode'), cpDist = $('cpDist'), cpDistUnit = $('cpDistUnit'),
+        cpBreakHours = $('cpBreakHours'), cpBreakMins = $('cpBreakMins'),
         cpStopsInput = $('cpStops'), cpBuildBtn = $('cpBuildBtn'), cpToRoadTripBtn = $('cpToRoadTripBtn'),
         cpStatus = $('cpStatus'), cpResults = $('cpResults'), cpTargetHint = $('cpTargetHint');
 
@@ -3712,19 +3754,69 @@
     cpStatus.className = 'status-text' + (kind ? ' '+kind : '');
   }
 
-  function cpTargetSeconds(){
-    const d = parseInt(cpDays.value,10)||0, h = parseInt(cpHours.value,10)||0, m = parseInt(cpMins.value,10)||0;
-    return d*86400 + h*3600 + m*60;
+  // The trip is described the way people actually plan one — how many days you're away and how
+  // much you want to cover each day — and the loop target is derived from that, rather than asking
+  // for one abstract lump of driving time.
+  function cpDaysValue(){ return Math.max(1, parseInt(cpDays.value,10)||1); }
+  function cpPerDaySeconds(){ return (parseInt(cpHours.value,10)||0)*3600 + (parseInt(cpMins.value,10)||0)*60; }
+  function cpPerDayMeters(){ return (parseFloat(cpDist.value)||0) * (unitState==='mi' ? 1609.344 : 1000); }
+  function cpBreakSeconds(){ return (parseInt(cpBreakHours.value,10)||0)*3600 + (parseInt(cpBreakMins.value,10)||0)*60; }
+
+  // "Auto" aims for roughly one stop per day, but a loop needs at least three points to be a ring
+  // at all, and the routing calls get expensive past eight.
+  function cpStopCount(){
+    const v = cpStopsInput.value;
+    if (v !== 'auto') return parseInt(v,10);
+    return Math.min(8, Math.max(3, cpDaysValue()-1));
+  }
+
+  function cpPlan(){
+    const days = cpDaysValue(), breakSec = cpBreakSeconds(), mode = cpPerDayMode.value;
+    if (mode === 'distance'){
+      const perDayMeters = cpPerDayMeters();
+      return { mode, days, breakSec, perDayMeters, targetMeters: perDayMeters*days };
+    }
+    const perDaySec = cpPerDaySeconds();
+    return { mode, days, breakSec, perDaySec, targetSec: perDaySec*days };
+  }
+
+  // Convert the per-day distance so "150 mi a day" stays the same real distance when the km/mi
+  // toggle flips, rather than silently becoming 150 km a day.
+  function cpRefreshForUnitChange(oldUnit){
+    if (oldUnit !== unitState){
+      const v = parseFloat(cpDist.value) || 0;
+      if (v) cpDist.value = Math.round(unitState==='mi' ? v*0.621371 : v*1.60934);
+    }
+    cpRefreshTargetHint();
+    if (cpLastLoop) cpRenderResults(cpLastLoop); // distances in the table follow the new unit
+  }
+
+  function cpRefreshModeUi(){
+    const dist = cpPerDayMode.value === 'distance';
+    $('cpPerDayTime').style.display = dist ? 'none' : '';
+    $('cpPerDayDist').style.display = dist ? '' : 'none';
+    cpDistUnit.textContent = unitState === 'mi' ? 'mi' : 'km';
   }
 
   function cpRefreshTargetHint(){
-    const t = cpTargetSeconds();
-    if (t <= 0){ cpTargetHint.textContent = ''; return; }
-    const stops = parseInt(cpStopsInput.value,10);
-    cpTargetHint.textContent = `target ${fmtHours(t)} driving · ≈ ${fmtHours(t/(stops+1))} per leg`;
+    cpRefreshModeUi();
+    const p = cpPlan();
+    const dayWord = p.days > 1 ? 'days' : 'day';
+    const legs = cpStopCount() + 1;
+    const bits = [];
+    if (p.mode === 'distance'){
+      if (!p.targetMeters){ cpTargetHint.textContent = ''; return; }
+      bits.push(`${p.days} ${dayWord} × ${fmtDist(p.perDayMeters)} = ${fmtDist(p.targetMeters)} round trip`);
+    } else {
+      if (!p.targetSec){ cpTargetHint.textContent = ''; return; }
+      bits.push(`${p.days} ${dayWord} × ${fmtHours(p.perDaySec)} = ${fmtHours(p.targetSec)} driving`);
+      if (p.breakSec) bits.push(`${fmtHours(p.perDaySec + p.breakSec)} out each day incl. breaks`);
+    }
+    bits.push(`${legs} legs`);
+    cpTargetHint.textContent = bits.join(' · ');
   }
-  [cpDays, cpHours, cpMins, cpStopsInput].forEach(el=> el.addEventListener('input', cpRefreshTargetHint));
-  cpStopsInput.addEventListener('change', cpRefreshTargetHint);
+  [cpDays, cpHours, cpMins, cpDist, cpBreakHours, cpBreakMins].forEach(el=> el.addEventListener('input', cpRefreshTargetHint));
+  [cpPerDayMode, cpStopsInput].forEach(el=> el.addEventListener('change', cpRefreshTargetHint));
   cpRefreshTargetHint();
 
   const CP_MAX_SNAP_METERS = 20000; // a ring point that snapped further than this isn't on a usable road
@@ -3745,35 +3837,42 @@
   async function cpMeasureRing(base, radiusKm, n){
     const seq = [base].concat(cpRingPoints(base, radiusKm, n));
     const coords = seq.map(p=>`${p.lon.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
-    const res = await fetch(`${OSRM}/table/v1/driving/${coords}`);
+    const res = await fetch(`${OSRM}/table/v1/driving/${coords}?annotations=duration,distance`);
     if (!res.ok) throw new Error('Routing service unavailable — try again in a moment');
     const data = await res.json();
     if (data.code !== 'Ok' || !data.durations) throw new Error('Could not measure a loop from there');
 
-    const D = data.durations, dests = data.destinations || [];
-    let total = 0;
+    const D = data.durations, X = data.distances || null, dests = data.destinations || [];
+    let total = 0, totalDist = 0;
     for (let i=0;i<seq.length;i++){
-      const d = D[i] && D[i][(i+1)%seq.length];
+      const j = (i+1)%seq.length;
+      const d = D[i] && D[i][j];
       if (d == null) return null; // some leg simply isn't drivable
       total += d;
+      if (X && X[i] && X[i][j] != null) totalDist += X[i][j];
     }
     const snapped = dests.map(x=>({ lat:x.location[1], lon:x.location[0], snap:x.distance }));
     if (snapped.slice(1).some(s=> s.snap > CP_MAX_SNAP_METERS)) return null;
-    return { total, radiusKm, stops: snapped.slice(1) };
+    return { total, totalDist, radiusKm, stops: snapped.slice(1) };
   }
 
-  // Binary search on ring radius: bigger ring -> longer loop, which is monotonic enough to home in on.
-  async function cpFindRing(base, targetSec, n){
-    const targetHours = targetSec/3600;
-    let lo = 1, hi = Math.min(1500, Math.max(60, targetHours * 25));
+  // Binary search on ring radius: bigger ring -> longer loop, which is monotonic enough to home in
+  // on. Searches against whichever metric the trip was described in, so "150 miles a day" is aimed
+  // at directly rather than being converted through an assumed average speed.
+  async function cpFindRing(base, plan, n){
+    const byTime = plan.mode === 'time';
+    const target = byTime ? plan.targetSec : plan.targetMeters;
+    const metric = r => byTime ? r.total : r.totalDist;
+    const hoursEquiv = byTime ? plan.targetSec/3600 : (plan.targetMeters/1000)/70; // ~70km/h to bracket the ring
+    let lo = 1, hi = Math.min(1500, Math.max(60, hoursEquiv * 25));
     let best = null;
     for (let it=0; it<9; it++){
       const mid = (lo+hi)/2;
       cpSetStatus(`Sizing the loop… (pass ${it+1} of 9)`);
       const r = await cpMeasureRing(base, mid, n);
       if (!r){ hi = mid; continue; } // unusable ring — pull it back in
-      if (!best || Math.abs(r.total-targetSec) < Math.abs(best.total-targetSec)) best = r;
-      if (r.total < targetSec) lo = mid; else hi = mid;
+      if (!best || Math.abs(metric(r)-target) < Math.abs(metric(best)-target)) best = r;
+      if (metric(r) < target) lo = mid; else hi = mid;
     }
     return best;
   }
@@ -3818,7 +3917,7 @@
   }
 
   function cpRenderResults(loop){
-    const { legs, totalDur, totalDist, targetSec } = loop;
+    const { legs, totalDur, totalDist, plan } = loop;
     let rows = '';
     legs.forEach((leg,i)=>{
       rows += `
@@ -3831,12 +3930,26 @@
         </div>`;
     });
 
-    const diff = totalDur - targetSec;
+    const byTime = plan.mode === 'time';
+    const achieved = byTime ? totalDur : totalDist;
+    const target = byTime ? plan.targetSec : plan.targetMeters;
+    const fmt = byTime ? fmtHours : fmtDist;
+    const diff = achieved - target;
     const off = Math.abs(diff);
-    const closeEnough = off <= Math.max(600, targetSec*0.05); // within 10 min or 5%
-    const verdict = closeEnough
-      ? `Loop comes to <strong>${fmtHours(totalDur)}</strong> of driving against your ${fmtHours(targetSec)} target — ${off < 60 ? 'bang on' : (diff>0?'about '+fmtHours(off)+' over':'about '+fmtHours(off)+' under')}.`
-      : `Closest loop found is <strong>${fmtHours(totalDur)}</strong> of driving, <span class="warn">${fmtHours(off)} ${diff>0?'over':'under'}</span> your ${fmtHours(targetSec)} target. Roads around the start may not allow a neat ring at that size — try a different number of stops or a nearby start point.`;
+    const closeEnough = off <= Math.max(byTime ? 600 : 8000, target*0.05); // within 10 min / 5 mi, or 5%
+
+    const headline = closeEnough
+      ? `Loop comes to <strong>${fmt(achieved)}</strong> against your ${fmt(target)} target — ${off < (byTime?60:1600) ? 'bang on' : `about ${fmt(off)} ${diff>0?'over':'under'}`}.`
+      : `Closest loop found is <strong>${fmt(achieved)}</strong>, <span class="warn">${fmt(off)} ${diff>0?'over':'under'}</span> your ${fmt(target)} target. The roads around your start may not allow a neat ring that size — try a different number of stops, or a start point with more road network around it.`;
+
+    const perDayDrive = totalDur / plan.days;
+    const dayWord = plan.days > 1 ? 'days' : 'day';
+    const outEach = plan.breakSec
+      ? ` — about <strong>${fmtHours(perDayDrive + plan.breakSec)}</strong> out each day once you add ${fmtHours(plan.breakSec)} of breaks and visits.`
+      : '.';
+    const dayLine = `Over ${plan.days} ${dayWord} that's <strong>${fmtDist(totalDist/plan.days)}</strong> and <strong>${fmtHours(perDayDrive)}</strong> of driving a day${outEach}`;
+
+    const verdict = `${headline}<br>${dayLine}`;
 
     cpResults.innerHTML = `
       <div class="results-head">
@@ -3852,9 +3965,14 @@
   async function buildCircularRoute(){
     const q = cpBaseInput.value.trim();
     if (!q){ cpSetStatus('Enter a start point first.', 'err'); return; }
-    const targetSec = cpTargetSeconds();
-    if (targetSec < 900){ cpSetStatus('Set a driving time of at least 15 minutes.', 'err'); return; }
-    const n = parseInt(cpStopsInput.value, 10);
+    const plan = cpPlan();
+    if (plan.mode === 'time' && plan.targetSec < 900){
+      cpSetStatus('Set at least 15 minutes of driving per day.', 'err'); return;
+    }
+    if (plan.mode === 'distance' && plan.targetMeters < 5000){
+      cpSetStatus('Set a longer distance per day.', 'err'); return;
+    }
+    const n = cpStopCount();
 
     cpBuildBtn.disabled = true;
     cpToRoadTripBtn.style.display = 'none';
@@ -3867,7 +3985,7 @@
       }
       base = { lat:base.lat, lon:base.lon, label:base.label || q };
 
-      const ring = await cpFindRing(base, targetSec, n);
+      const ring = await cpFindRing(base, plan, n);
       if (!ring) throw new Error("Couldn't find a drivable loop from there — try fewer stops or a start point nearer a road network.");
 
       cpSetStatus('Naming the stops…');
@@ -3902,7 +4020,7 @@
         allCoords.push(...route.geometry.coordinates);
       }
 
-      cpLastLoop = { base, stops, legs, totalDur, totalDist, targetSec, coords: allCoords };
+      cpLastLoop = { base, stops, legs, totalDur, totalDist, plan, coords: allCoords };
       cpDrawLoop(base, stops, allCoords);
       cpRenderResults(cpLastLoop);
       cpToRoadTripBtn.style.display = '';
@@ -3978,7 +4096,9 @@
           circular: {
             text: cpBaseInput.value.trim(),
             coords: cpAcState.coords,
-            days: cpDays.value, hours: cpHours.value, mins: cpMins.value,
+            days: cpDays.value, mode: cpPerDayMode.value,
+            hours: cpHours.value, mins: cpMins.value, dist: cpDist.value,
+            breakHours: cpBreakHours.value, breakMins: cpBreakMins.value,
             stops: cpStopsInput.value
           },
           tab: Object.keys(PANELS).find(k=> $(PANELS[k].tab).classList.contains('active')) || 'road'
@@ -4013,8 +4133,12 @@
     if (cp.text) cpBaseInput.value = cp.text;
     if (cp.coords) cpAcState.coords = cp.coords;
     if (cp.days !== undefined) cpDays.value = cp.days;
+    if (cp.mode) cpPerDayMode.value = cp.mode;
     if (cp.hours !== undefined) cpHours.value = cp.hours;
     if (cp.mins !== undefined) cpMins.value = cp.mins;
+    if (cp.dist !== undefined) cpDist.value = cp.dist;
+    if (cp.breakHours !== undefined) cpBreakHours.value = cp.breakHours;
+    if (cp.breakMins !== undefined) cpBreakMins.value = cp.breakMins;
     if (cp.stops) cpStopsInput.value = cp.stops;
     cpRefreshTargetHint();
 
