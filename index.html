@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Waypoint — Trip Sheet</title>
+<title>Phloyd's Trip Planner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -653,7 +653,7 @@
     height:420px;
     background:var(--white);
   }
-  #mapCanvas{width:100%;height:100%;}
+  #mapCanvas, #bcMapCanvas{width:100%;height:100%;}
   .map-placeholder{
     position:absolute;
     inset:0;
@@ -854,25 +854,57 @@
   }
   .footnote a{color:var(--road);}
 
-  .single-dest-panel{
-    border:1px dashed var(--grid-strong);
-    padding:40px 30px;
-    text-align:center;
+  /* ---------- Base Camp ---------- */
+  .bc-results-wrap{
+    border:1px solid var(--grid-strong);
     background:var(--white);
+    padding:14px 16px;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
   }
-  .single-dest-panel .big{
-    font-family:'Space Grotesk',sans-serif;
-    font-size:17px;
-    margin-bottom:8px;
-    display:block;
-  }
-  .single-dest-panel p{
+  .bc-group{display:flex;flex-direction:column;gap:7px;}
+  .bc-group-label{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
     color:var(--ink-soft);
-    font-size:13px;
-    max-width:440px;
-    margin:0 auto;
-    line-height:1.6;
+    display:flex;
+    align-items:center;
+    gap:7px;
   }
+  .bc-count{
+    background:#F2F1EA;
+    border:1px solid var(--grid);
+    border-radius:20px;
+    padding:1px 7px;
+    font-size:10px;
+  }
+  .bc-chip{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;
+    padding:3px 9px;
+    border-radius:20px;
+    white-space:nowrap;
+    cursor:pointer;
+    border:1px solid transparent;
+  }
+  .bc-chip .dist{opacity:0.75;}
+  .bc-chip:focus{outline:none;}
+  .bc-viewpoint{background:#E3F0F2;color:#1F5B66;border-color:#C4DFE4;}
+  .bc-viewpoint:hover,.bc-viewpoint:focus{background:#CFE6EA;}
+  .bc-viewpoint.chip-active{background:#2C7D8C;color:#fff;border-color:#2C7D8C;}
+  .bc-trail{background:#E9F1E3;color:#3A5E2C;border-color:#CFE2C3;}
+  .bc-trail:hover,.bc-trail:focus{background:#D9EACB;}
+  .bc-trail.chip-active{background:#4C8C3B;color:#fff;border-color:#4C8C3B;}
+  .bc-historic{background:#F4EEE1;color:#6B5426;border-color:#E2D5BC;}
+  .bc-historic:hover,.bc-historic:focus{background:#EBE1CC;}
+  .bc-historic.chip-active{background:#8A6D3B;color:#fff;border-color:#8A6D3B;}
+  .bc-outdoors{background:#E1F0EC;color:#155F54;border-color:#C2E0D8;}
+  .bc-outdoors:hover,.bc-outdoors:focus{background:#CDE7E0;}
+  .bc-outdoors.chip-active{background:#1B8A7A;color:#fff;border-color:#1B8A7A;}
+  .bc-chip.chip-active .dist{opacity:0.85;}
 
   @media (max-width:820px){
     .results-head, .leg-row, .totals-row{grid-template-columns:44px 1fr 1fr;}
@@ -911,7 +943,7 @@
 
 <div class="topband">
   <div class="brand-row">
-    <div class="brand">Waypoint <small>trip sheet</small></div>
+    <div class="brand">Phloyd's Trip Planner</div>
     <div class="topband-right">
       <button type="button" class="unit-switch" id="unitSwitch" role="switch" aria-checked="true" aria-label="Toggle units between km and mi">
         <span class="unit-switch-label" data-unit="km">km</span>
@@ -924,7 +956,7 @@
     <button class="tab active" id="tabRoadtrip" type="button" title="Double-click the name to rename this tab">
       <span class="dot"></span><span class="tab-label" id="tabRoadtripLabel" spellcheck="false">Road Trip</span>
     </button>
-    <button class="tab disabled" id="tabSingle" title="Coming after the road-trip mode is finished">Single Destination</button>
+    <button class="tab" id="tabSingle" type="button" title="Explore outwards from one base">Base Camp</button>
   </div>
 </div>
 
@@ -1146,9 +1178,78 @@
   </div>
 
   <div id="singlePanel" style="display:none;">
-    <div class="single-dest-panel">
-      <span class="big">Single-destination mode</span>
-      <p>Building the road-trip splitter first. Once that's solid, this tab will handle a single base with day-trip radius suggestions.</p>
+
+    <div class="input-grid">
+      <div class="rowhead">1</div>
+      <div class="label-cell">Base camp (B1)</div>
+      <div class="input-cell"><div class="autocomplete-wrap">
+        <input type="text" id="bcBaseInput" placeholder="e.g. Keswick, Cumbria" autocomplete="off">
+        <div class="ac-list" id="bcBaseAcList"></div>
+      </div></div>
+
+      <div class="rowhead">2</div>
+      <div class="label-cell">Max drive (B2)</div>
+      <div class="input-cell">
+        <select id="bcTimeInput">
+          <option value="15">Up to 15 minutes</option>
+          <option value="30">Up to 30 minutes</option>
+          <option value="45" selected>Up to 45 minutes</option>
+          <option value="60">Up to 1 hour</option>
+          <option value="90">Up to 1.5 hours</option>
+          <option value="120">Up to 2 hours</option>
+        </select>
+      </div>
+
+      <div class="rowhead">3</div>
+      <div class="label-cell">Show me (B3)</div>
+      <div class="input-cell">
+        <div class="amenity-filters">
+          <label><input type="checkbox" id="bcViewpoints" checked> 🏔 Scenic viewpoints</label>
+          <label><input type="checkbox" id="bcTrails" checked> 🥾 Walking trails</label>
+          <label><input type="checkbox" id="bcHistoric" checked> 🏛 Historic sites</label>
+          <label><input type="checkbox" id="bcOutdoors"> 🎣 Fishing &amp; outdoors</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <div class="rowhead">4</div>
+      <div class="label-cell">Run</div>
+      <div class="action-cell">
+        <button id="bcExploreBtn">Explore from base</button>
+        <span class="status-text" id="bcStatus">Enter a base camp, then explore.</span>
+      </div>
+    </div>
+
+    <div id="bcResults">
+      <div class="empty-state">
+        <span class="big">Nothing explored yet</span>
+        Pick a base and a maximum drive time — the map shades everywhere you can actually reach in that time, and the list fills with places worth driving to inside it.
+      </div>
+    </div>
+
+    <div class="map-section">
+      <div class="map-title-row">
+        <span class="map-title">Reachable area</span>
+        <span class="map-legend">
+          <span><span class="legend-dot" style="background:#153D2B;"></span>base camp</span>
+          <span><span class="legend-dot" style="background:#2C7D8C;"></span>viewpoint</span>
+          <span><span class="legend-dot" style="background:#4C8C3B;"></span>trail</span>
+          <span><span class="legend-dot" style="background:#8A6D3B;"></span>historic</span>
+          <span><span class="legend-dot" style="background:#1B8A7A;"></span>outdoors</span>
+        </span>
+      </div>
+      <div class="map-outer">
+        <div id="bcMapCanvas"></div>
+        <div class="map-placeholder" id="bcMapPlaceholder">
+          <span class="big">Map appears here</span>
+          Explore from a base to see your drive-time area shaded, with everything found inside it pinned.
+        </div>
+      </div>
+    </div>
+
+    <div class="footnote">
+      The shaded area is a drive-time estimate probed outward from your base along 16 compass directions via OSRM — a good approximation of how far you can get, not a guarantee. Places come from OpenStreetMap and only show up if someone has tagged them there, so a genuinely quiet area and an under-mapped one look the same.
     </div>
   </div>
 
@@ -1695,6 +1796,13 @@
   let lastFuelLegs = []; // [{distMeters, countryCode, countryName}] populated after a successful route calc
   let lastRouteSegments = []; // [{built, segDistance}] per mandatory-to-mandatory segment, for the fill-up station finder
 
+  // Prices the user has typed over the defaults. Keyed so an override only comes back for the
+  // combination it was entered under — a £ petrol price must not reappear as a € diesel price —
+  // which also means edits now survive a unit toggle or a re-render instead of being reset.
+  let priceOverrides = { fuel:{}, electric:{}, toll:{} };
+  const fuelOverrideKey = code => `${fuelTypeInput.value}|${currencyInput.value}|${code}`;
+  const tollOverrideKey = code => `${currencyInput.value}|${code}`;
+
   const fuelTypeInput = $('fuelTypeInput'), efficiencyInput = $('efficiencyInput'),
         efficiencyLabel = $('efficiencyLabel'), currencyInput = $('currencyInput'),
         fuelControls = $('fuelControls'), fuelPlaceholder = $('fuelPlaceholder'), fuelTable = $('fuelTable'),
@@ -1740,7 +1848,8 @@
       if (!efficiencyInput.dataset.userSet || efficiencyInput.dataset.lastType!=='electric') efficiencyInput.value = 18;
       efficiencyInput.dataset.lastType = 'electric';
       const totalKm = lastFuelLegs.reduce((s,l)=>s+l.distMeters,0)/1000;
-      const defaultRate = ELECTRIC_DEFAULTS[currency];
+      const savedRate = priceOverrides.electric[currency];
+      const defaultRate = savedRate !== undefined ? parseFloat(savedRate) : ELECTRIC_DEFAULTS[currency];
       fuelTable.innerHTML = `
         <div class="fuel-row head"><div>Electricity</div><div>Distance</div><div>Rate</div><div></div><div>Cost</div></div>
         <div class="fuel-row" id="electricRow">
@@ -1750,7 +1859,10 @@
           <div></div>
           <div class="fuel-subtotal" id="electricSubtotal">—</div>
         </div>`;
-      $('electricPriceInput').addEventListener('input', recomputeFuelTotals);
+      $('electricPriceInput').addEventListener('input', e=>{
+        priceOverrides.electric[currencyInput.value] = e.target.value;
+        recomputeFuelTotals();
+      });
     } else {
       const useMpg = unitState === 'mi';
       efficiencyLabel.textContent = useMpg ? 'Efficiency (MPG, UK gal)' : 'Efficiency (L/100km)';
@@ -1764,7 +1876,8 @@
       rows.forEach(r=>{
         const def = FUEL_DEFAULTS[r.code];
         const basePrice = def ? def[fuelType] : 1.60;
-        const price = (basePrice * CURRENCY_RATES[currency]).toFixed(2);
+        const saved = priceOverrides.fuel[fuelOverrideKey(r.code)];
+        const price = saved !== undefined ? saved : (basePrice * CURRENCY_RATES[currency]).toFixed(2);
         html += `
           <div class="fuel-row" data-code="${r.code}" data-dist="${r.distMeters}">
             <div class="country-name">${r.name}</div>
@@ -1775,7 +1888,11 @@
           </div>`;
       });
       fuelTable.innerHTML = html;
-      fuelTable.querySelectorAll('.country-price').forEach(inp=> inp.addEventListener('input', recomputeFuelTotals));
+      fuelTable.querySelectorAll('.country-price').forEach(inp=> inp.addEventListener('input', e=>{
+        const row = e.target.closest('.fuel-row');
+        if (row) priceOverrides.fuel[fuelOverrideKey(row.dataset.code)] = e.target.value;
+        recomputeFuelTotals();
+      }));
     }
 
     recomputeFuelTotals();
@@ -1900,17 +2017,23 @@
     let html = `<div class="fuel-row head"><div>Country</div><div>Distance</div><div>Basis</div><div></div><div>Cost</div></div>`;
     rows.forEach(r=>{
       const { basisLabel, defaultCost } = tollBasisAndDefault(r.code, r.distMeters, currency);
+      const saved = priceOverrides.toll[tollOverrideKey(r.code)];
+      const cost = saved !== undefined ? saved : defaultCost.toFixed(2);
       html += `
-        <div class="fuel-row" data-dist="${r.distMeters}">
+        <div class="fuel-row" data-code="${r.code}" data-dist="${r.distMeters}">
           <div class="country-name">${r.name}</div>
           <div class="dist-cell">${fmtDist(r.distMeters)}</div>
           <div class="toll-basis">${basisLabel}</div>
           <div></div>
-          <div>${symbol} <input type="number" class="price-input toll-cost-input" value="${defaultCost.toFixed(2)}" min="0" step="0.01"></div>
+          <div>${symbol} <input type="number" class="price-input toll-cost-input" value="${cost}" min="0" step="0.01"></div>
         </div>`;
     });
     tollTable.innerHTML = html;
-    tollTable.querySelectorAll('.toll-cost-input').forEach(inp=> inp.addEventListener('input', recomputeTollTotal));
+    tollTable.querySelectorAll('.toll-cost-input').forEach(inp=> inp.addEventListener('input', e=>{
+      const row = e.target.closest('.fuel-row');
+      if (row) priceOverrides.toll[tollOverrideKey(row.dataset.code)] = e.target.value;
+      recomputeTollTotal();
+    }));
     recomputeTollTotal();
   }
 
@@ -2659,7 +2782,7 @@
           selectSuggestion(state, state.hl);
         } else {
           closeAcList(state);
-          run();
+          (state.onEnter || run)(); // Base Camp reuses this widget but must not fire a road-trip calculation
         }
         return;
       }
@@ -2904,7 +3027,7 @@
       return;
     }
     const data = serializeRoute();
-    const filename = `waypoint-${slugify(startQ)}-to-${slugify(endQ)}.json`;
+    const filename = `phloyds-${slugify(startQ)}-to-${slugify(endQ)}.json`;
     downloadFile(filename, JSON.stringify(data, null, 2), 'application/json');
     setSaveLoadStatus('Saved as ' + filename, 'ok');
   }
@@ -2926,7 +3049,7 @@
       `  <wpt lat="${s.lat}" lon="${s.lon}"><name>${xmlEscape(s.label || mandatoryStopKind(i))}</name><type>${mandatoryStopKind(i)}</type></wpt>`
     ).join('\n');
     const trkpts = lastRouteCoords.map(c => `      <trkpt lat="${c[1]}" lon="${c[0]}"></trkpt>`).join('\n');
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Waypoint Trip Sheet" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${tripName}</name></metadata>\n${wpts}\n  <trk>\n    <name>${tripName}</name>\n    <trkseg>\n${trkpts}\n    </trkseg>\n  </trk>\n</gpx>`;
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Phloyd&apos;s Trip Planner" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${tripName}</name></metadata>\n${wpts}\n  <trk>\n    <name>${tripName}</name>\n    <trkseg>\n${trkpts}\n    </trkseg>\n  </trk>\n</gpx>`;
   }
 
   function buildKml(){
@@ -2943,7 +3066,7 @@
       setSaveLoadStatus('Calculate a route first.', 'err');
       return;
     }
-    const filename = `waypoint-${slugify(startInput.value.trim())}-to-${slugify(endInput.value.trim())}.gpx`;
+    const filename = `phloyds-${slugify(startInput.value.trim())}-to-${slugify(endInput.value.trim())}.gpx`;
     downloadFile(filename, buildGpx(), 'application/gpx+xml');
     setSaveLoadStatus('Exported ' + filename, 'ok');
   }
@@ -2953,7 +3076,7 @@
       setSaveLoadStatus('Calculate a route first.', 'err');
       return;
     }
-    const filename = `waypoint-${slugify(startInput.value.trim())}-to-${slugify(endInput.value.trim())}.kml`;
+    const filename = `phloyds-${slugify(startInput.value.trim())}-to-${slugify(endInput.value.trim())}.kml`;
     downloadFile(filename, buildKml(), 'application/vnd.google-earth.kml+xml');
     setSaveLoadStatus('Exported ' + filename, 'ok');
   }
@@ -2963,7 +3086,7 @@
     const dateStr = new Date().toLocaleDateString(undefined, { year:'numeric', month:'long', day:'numeric' });
     $('printHeader').innerHTML = `
       <div class="print-header">
-        <div class="print-title">Waypoint — Trip Sheet</div>
+        <div class="print-title">Phloyd's Trip Planner</div>
         <div class="print-trip-name">${xmlEscape(tabLabel.textContent)}</div>
         <div class="print-route-summary">${xmlEscape(startLabel)} → ${xmlEscape(endLabel)} · ${fmtDist(totalDistance)} · ${fmtHours(totalDuration)}</div>
         <div class="print-generated">Generated ${dateStr}</div>
@@ -2978,7 +3101,7 @@
     window.print();
   }
 
-  function applyLoadedRoute(data){
+  function applyLoadedRoute(data, opts){
     if (!data || typeof data !== 'object' || !data.start || !data.end){
       setSaveLoadStatus('That file doesn\'t look like a saved route from this tool.', 'err');
       return;
@@ -3023,6 +3146,13 @@
     }
 
     if (data.tripName) tabLabel.textContent = data.tripName;
+
+    // Restoring from localStorage deliberately stops here rather than recalculating: reloading a
+    // page shouldn't silently fire off a burst of routing and map-data requests.
+    if (opts && opts.skipRun){
+      setSaveLoadStatus('Restored your last session — press Calculate route to rebuild the trip sheet.', 'ok');
+      return;
+    }
 
     setSaveLoadStatus('Route loaded — recalculating…', 'ok');
     run();
@@ -3087,10 +3217,377 @@
   // clicking (not double-clicking) the label while it isn't being edited shouldn't start editing
   tabLabel.addEventListener('click', e=>{ if (tabLabel.contentEditable !== 'true') e.preventDefault(); });
 
-  // Tab switching (single-destination is a stub for now)
-  $('tabSingle').addEventListener('click', ()=>{
-    setStatus('Single-destination mode is next on the list — road trip mode first.', 'err');
+  /* ---------- Base Camp: radial explore engine ---------- */
+  const bcBaseInput = $('bcBaseInput'), bcTimeInput = $('bcTimeInput'),
+        bcExploreBtn = $('bcExploreBtn'), bcStatus = $('bcStatus'), bcResults = $('bcResults');
+
+  const BC_CATS = {
+    viewpoint: { label:'Scenic viewpoints', icon:'🏔', color:'#2C7D8C' },
+    trail:     { label:'Walking trails',    icon:'🥾', color:'#4C8C3B' },
+    historic:  { label:'Historic sites',    icon:'🏛', color:'#8A6D3B' },
+    outdoors:  { label:'Fishing & outdoors',icon:'🎣', color:'#1B8A7A' }
+  };
+  const BC_CAT_ORDER = ['viewpoint','trail','historic','outdoors'];
+
+  const bcAcState = { list: $('bcBaseAcList'), input: bcBaseInput, results:[], hl:-1, coords:null, debounce:null };
+  bcAcState.onEnter = ()=> exploreBaseCamp();
+  wireAutocomplete(bcAcState);
+
+  let bcMap = null, bcLayers = [], bcMarkerIndex = {}, bcLastPoly = null;
+
+  function bcEnsureMap(){
+    if (bcMap) return bcMap;
+    bcMap = L.map('bcMapCanvas', { scrollWheelZoom:true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(bcMap);
+    bcMap.setView([54.5,-3], 6);
+    return bcMap;
+  }
+
+  function bcSetStatus(msg, kind){
+    bcStatus.textContent = msg;
+    bcStatus.className = 'status-text' + (kind ? ' '+kind : '');
+  }
+
+  // Point at `distKm` from (lat,lon) along a compass bearing, on a spherical earth.
+  function destPoint(lat, lon, bearingDeg, distKm){
+    const R = 6371, br = bearingDeg*Math.PI/180, dr = distKm/R;
+    const la1 = lat*Math.PI/180, lo1 = lon*Math.PI/180;
+    const la2 = Math.asin(Math.sin(la1)*Math.cos(dr) + Math.cos(la1)*Math.sin(dr)*Math.cos(br));
+    const lo2 = lo1 + Math.atan2(Math.sin(br)*Math.sin(dr)*Math.cos(la1), Math.cos(dr)-Math.sin(la1)*Math.sin(la2));
+    return { lat: la2*180/Math.PI, lon: ((lo2*180/Math.PI)+540)%360-180 };
+  }
+
+  const BC_BEARINGS = 16;
+  const BC_RING_FRACS = [0.2,0.35,0.5,0.65,0.82,1.0];
+  const BC_MAX_SNAP_METERS = 5000; // a probe that snapped this far says nothing about its own direction
+
+  // Probes outward along 16 bearings and asks OSRM's table service for the drive time to every
+  // probe in ONE request, then keeps the furthest point per bearing that's still inside the budget.
+  // That traces a real drive-time boundary rather than a plain "distance = speed × time" circle.
+  async function buildIsochrone(base, minutes){
+    const maxKm = minutes * 1.5; // ~90km/h upper bound, so the outermost ring always overshoots the true edge
+    const probes = [];
+    for (let b=0;b<BC_BEARINGS;b++){
+      for (const f of BC_RING_FRACS){
+        probes.push(destPoint(base.lat, base.lon, b*(360/BC_BEARINGS), maxKm*f));
+      }
+    }
+    const coords = [`${base.lon},${base.lat}`]
+      .concat(probes.map(p=>`${p.lon.toFixed(6)},${p.lat.toFixed(6)}`))
+      .join(';');
+    const res = await fetch(`${OSRM}/table/v1/driving/${coords}?sources=0`);
+    if (!res.ok) throw new Error('Drive-time service unavailable — try again in a moment');
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.durations) throw new Error('Could not measure drive times from there');
+
+    const durs = data.durations[0], dests = data.destinations || [];
+    const budget = minutes*60;
+    const ring = [];
+    for (let b=0;b<BC_BEARINGS;b++){
+      let furthest = null;
+      for (let r=0;r<BC_RING_FRACS.length;r++){
+        const i = b*BC_RING_FRACS.length + r;
+        const dur = durs[i+1];
+        const snap = dests[i+1] ? dests[i+1].distance : 0;
+        if (dur == null || snap > BC_MAX_SNAP_METERS) continue;
+        if (dur <= budget) furthest = probes[i];
+      }
+      // nothing reachable this way (sea, dead end) — pull the boundary back to the base
+      ring.push(furthest || { lat: base.lat, lon: base.lon });
+    }
+    return ring;
+  }
+
+  // Standard ray-casting test, so a POI only counts if it's inside the traced boundary rather
+  // than merely inside the circle we searched.
+  function pointInRing(lat, lon, ring){
+    let inside = false;
+    for (let i=0, j=ring.length-1; i<ring.length; j=i++){
+      const yi=ring[i].lat, xi=ring[i].lon, yj=ring[j].lat, xj=ring[j].lon;
+      if (((yi>lat)!==(yj>lat)) && (lon < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside = !inside;
+    }
+    return inside;
+  }
+
+  function bcSelectedCats(){
+    return {
+      viewpoint: $('bcViewpoints').checked,
+      trail:     $('bcTrails').checked,
+      historic:  $('bcHistoric').checked,
+      outdoors:  $('bcOutdoors').checked
+    };
+  }
+
+  // Each category gets its own `out` rather than sharing one on a union: a single shared limit is
+  // spent in element-type order (all nodes, then relations), so viewpoints and historic sites
+  // would silently consume the whole quota and every trail relation would vanish from the results.
+  function bcOverpassQuery(lat, lon, radius, cats){
+    const at = `around:${radius},${lat},${lon}`;
+    let q = '[out:json][timeout:30];';
+    if (cats.viewpoint) q += `node(${at})[tourism=viewpoint];out body 60;`;
+    if (cats.trail)     q += `relation(${at})[route~"^(hiking|foot)$"];out center 40;`;
+    if (cats.historic)  q += `node(${at})[historic~"^(castle|ruins|monument|archaeological_site|fort|manor)$"];out body 60;`;
+    if (cats.outdoors){
+      q += `node(${at})[leisure~"^(fishing|nature_reserve)$"];out body 40;`;
+      q += `node(${at})[natural=beach];out body 20;`;
+    }
+    return q;
+  }
+
+  function bcClassify(tags){
+    if (tags.tourism === 'viewpoint') return 'viewpoint';
+    if (tags.route === 'hiking' || tags.route === 'foot') return 'trail';
+    if (tags.historic) return 'historic';
+    return 'outdoors';
+  }
+
+  function bcClearLayers(){
+    const map = bcEnsureMap();
+    bcLayers.forEach(l=>map.removeLayer(l));
+    bcLayers = [];
+    bcMarkerIndex = {};
+    bcLastPoly = null;
+  }
+
+  function bcDrawIsochrone(base, ring, minutes){
+    const map = bcEnsureMap();
+    $('bcMapPlaceholder').classList.add('hidden');
+    bcClearLayers();
+    const poly = L.polygon(ring.map(p=>[p.lat,p.lon]), {
+      color:'#3B6E8F', weight:2, fillColor:'#3B6E8F', fillOpacity:0.12
+    }).addTo(map);
+    poly.bindPopup(`<div class="pop-title">Within ${minutes} minutes</div>Everything inside this outline is roughly ${minutes} minutes' drive from your base.`);
+    bcLayers.push(poly);
+
+    const marker = L.circleMarker([base.lat, base.lon], {
+      radius:9, color:'#fff', weight:2, fillColor:'#153D2B', fillOpacity:1
+    }).addTo(map);
+    marker.bindPopup(`<div class="pop-title">Base camp</div>${base.label || 'Base'}`);
+    bcLayers.push(marker);
+
+    // Size first, then frame — a map created before layout settles measures its container too
+    // small, and fitBounds against that stale size leaves the view zoomed out with bare tiles.
+    // The delayed repeat covers the case where the panel was still being shown.
+    bcLastPoly = poly;
+    bcFitToArea();
+    setTimeout(bcFitToArea, 150);
+  }
+
+  function bcFitToArea(){
+    if (!bcMap || !bcLastPoly) return;
+    bcMap.invalidateSize();
+    bcMap.fitBounds(bcLastPoly.getBounds(), { padding:[28,28] });
+  }
+
+  function bcMarkerKey(lat, lon){ return lat.toFixed(5)+','+lon.toFixed(5); }
+
+  function bcDrawPoiMarker(p){
+    const map = bcEnsureMap();
+    const c = BC_CATS[p.cat];
+    const m = L.circleMarker([p.lat, p.lon], {
+      radius:6, color:'#fff', weight:2, fillColor:c.color, fillOpacity:1
+    }).addTo(map);
+    m.bindPopup(`<div class="pop-title">${c.icon} ${c.label}</div>${p.name}<button type="button" class="popup-add-btn" data-lat="${p.lat}" data-lon="${p.lon}" data-name="${p.name.replace(/"/g,'&quot;')}">+ Add to route</button>`);
+    bcLayers.push(m);
+    bcMarkerIndex[bcMarkerKey(p.lat, p.lon)] = m;
+  }
+
+  function bcChipHtml(p){
+    return `<span class="bc-chip bc-${p.cat}" tabindex="0" role="button" data-lat="${p.lat}" data-lon="${p.lon}" data-name="${p.name.replace(/"/g,'&quot;')}" title="Show on map">${p.name} <span class="dist">${townDistLabel(p.dist)}</span></span>`;
+  }
+
+  function bcRenderResults(pois, base, minutes){
+    if (!pois.length){
+      bcResults.innerHTML = `<div class="empty-state"><span class="big">Nothing found in range</span>Nothing matching those categories is tagged in OpenStreetMap within ${minutes} minutes of ${base.label || 'your base'}. Try a longer drive time, or tick more categories.</div>`;
+      return;
+    }
+    let html = '';
+    BC_CAT_ORDER.forEach(cat=>{
+      const list = pois.filter(p=>p.cat===cat);
+      if (!list.length) return;
+      const c = BC_CATS[cat];
+      html += `<div class="bc-group">
+        <div class="bc-group-label">${c.icon} ${c.label}<span class="bc-count">${list.length}</span></div>
+        <div class="chip-row">${list.map(bcChipHtml).join('')}</div>
+      </div>`;
+    });
+    bcResults.innerHTML = `<div class="bc-results-wrap">${html}</div>`;
+  }
+
+  async function exploreBaseCamp(){
+    const q = bcBaseInput.value.trim();
+    if (!q){ bcSetStatus('Enter a base camp location first.', 'err'); return; }
+    const minutes = parseInt(bcTimeInput.value, 10);
+    const cats = bcSelectedCats();
+    const anyCat = BC_CAT_ORDER.some(c=>cats[c]);
+
+    bcExploreBtn.disabled = true;
+    try {
+      let base = bcAcState.coords;
+      if (!base){
+        bcSetStatus('Locating ' + q + '…');
+        const g = await geocode(q);
+        base = { lat:g.lat, lon:g.lon, label:g.label };
+      }
+
+      bcSetStatus(`Measuring how far you can drive in ${minutes} minutes…`);
+      const ring = await buildIsochrone(base, minutes);
+      bcDrawIsochrone(base, ring, minutes);
+
+      if (!anyCat){
+        bcRenderResults([], base, minutes);
+        bcSetStatus('Reachable area mapped — tick a category to fill it with places.', 'ok');
+        return;
+      }
+      if (isFileProtocol){
+        bcRenderResults([], base, minutes);
+        bcSetStatus('Area mapped, but finding places needs the page served over http(s) — see the notice on the Road Trip tab.', 'err');
+        return;
+      }
+
+      bcSetStatus('Finding places inside that area…');
+      const reachKm = ring.reduce((max,p)=> Math.max(max, haversine(base.lat, base.lon, p.lat, p.lon)), 0);
+      const radius = Math.round(Math.max(reachKm*1000, 1000));
+      const data = await overpassQuery(bcOverpassQuery(base.lat, base.lon, radius, cats));
+
+      const seen = new Set();
+      const pois = (data.elements||[])
+        .map(el=>{
+          const lat = typeof el.lat==='number' ? el.lat : (el.center && el.center.lat);
+          const lon = typeof el.lon==='number' ? el.lon : (el.center && el.center.lon);
+          const tags = el.tags || {};
+          if (typeof lat!=='number' || typeof lon!=='number' || !tags.name) return null;
+          return { name: tags.name, lat, lon, cat: bcClassify(tags), dist: haversine(base.lat, base.lon, lat, lon) };
+        })
+        .filter(Boolean)
+        .filter(p => pointInRing(p.lat, p.lon, ring))
+        .filter(p => {
+          const k = p.cat+'|'+p.name.toLowerCase();
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        })
+        .sort((a,b)=>a.dist-b.dist);
+
+      bcRenderResults(pois, base, minutes);
+      pois.forEach(bcDrawPoiMarker);
+      bcSetStatus(`Done — ${pois.length} place${pois.length===1?'':'s'} within ${minutes} minutes of ${base.label || q}.`, 'ok');
+    } catch(err){
+      console.error('exploreBaseCamp failed', err);
+      bcSetStatus(err.message || 'Something went wrong.', 'err');
+    } finally {
+      bcExploreBtn.disabled = false;
+    }
+  }
+
+  bcExploreBtn.addEventListener('click', exploreBaseCamp);
+  bcResults.addEventListener('click', e=>{
+    const chip = e.target.closest('.bc-chip');
+    if (!chip) return;
+    const lat = parseFloat(chip.dataset.lat), lon = parseFloat(chip.dataset.lon);
+    if (isNaN(lat) || isNaN(lon)) return;
+    document.querySelectorAll('.bc-chip.chip-active').forEach(c=>c.classList.remove('chip-active'));
+    chip.classList.add('chip-active');
+    const m = bcMarkerIndex[bcMarkerKey(lat, lon)];
+    if (!m) return;
+    const map = bcEnsureMap();
+    m.openPopup();
+    map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 12), { duration:0.6 });
+    const outer = document.querySelector('#singlePanel .map-outer');
+    if (outer) outer.scrollIntoView({ behavior:'smooth', block:'center' });
   });
+  bcResults.addEventListener('keydown', e=>{
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const chip = e.target.closest('.bc-chip');
+    if (!chip) return;
+    e.preventDefault();
+    chip.click();
+  });
+  // "+ Add to route" inside a Base Camp popup hands the place over to the road-trip planner
+  document.getElementById('singlePanel').addEventListener('click', e=>{
+    const btn = e.target.closest('.popup-add-btn');
+    if (!btn) return;
+    const lat = parseFloat(btn.dataset.lat), lon = parseFloat(btn.dataset.lon);
+    if (isNaN(lat) || isNaN(lon)) return;
+    showPanel('road');
+    addLocationAsViaStop(lat, lon, btn.dataset.name || 'Stop');
+  });
+
+  /* ---------- Tab switching ---------- */
+  function showPanel(which){
+    const road = which === 'road';
+    $('roadtripPanel').style.display = road ? '' : 'none';
+    $('singlePanel').style.display = road ? 'none' : '';
+    $('tabRoadtrip').classList.toggle('active', road);
+    $('tabSingle').classList.toggle('active', !road);
+    // Leaflet can't size a map that was hidden when it was created
+    if (!road && bcMap) setTimeout(bcFitToArea, 60);
+    if (road && leafletMap) setTimeout(()=> leafletMap.invalidateSize(), 60);
+  }
+  $('tabRoadtrip').addEventListener('click', ()=> showPanel('road'));
+  $('tabSingle').addEventListener('click', ()=> showPanel('base'));
+
+  /* ---------- Auto-save to localStorage ---------- */
+  const STORAGE_KEY = 'phloyds-trip-planner-v1';
+  let saveTimer = null;
+
+  function saveState(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(()=>{
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          v: 1,
+          route: serializeRoute(),
+          priceOverrides,
+          baseCamp: {
+            text: bcBaseInput.value.trim(),
+            coords: bcAcState.coords,
+            minutes: bcTimeInput.value,
+            cats: bcSelectedCats()
+          },
+          tab: $('tabSingle').classList.contains('active') ? 'base' : 'road'
+        }));
+      } catch(e){
+        // private browsing, or storage full — auto-save is a convenience and must never break the app
+      }
+    }, 400);
+  }
+
+  function restoreState(){
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch(e){ return; }
+    if (!saved || !saved.route) return;
+
+    if (saved.priceOverrides && typeof saved.priceOverrides === 'object'){
+      priceOverrides = Object.assign({ fuel:{}, electric:{}, toll:{} }, saved.priceOverrides);
+    }
+
+    const bc = saved.baseCamp || {};
+    if (bc.text) bcBaseInput.value = bc.text;
+    if (bc.coords) bcAcState.coords = bc.coords;
+    if (bc.minutes) bcTimeInput.value = bc.minutes;
+    if (bc.cats){
+      $('bcViewpoints').checked = !!bc.cats.viewpoint;
+      $('bcTrails').checked     = !!bc.cats.trail;
+      $('bcHistoric').checked   = !!bc.cats.historic;
+      $('bcOutdoors').checked   = !!bc.cats.outdoors;
+    }
+
+    const r = saved.route;
+    if ((r.start && r.start.text) || (r.end && r.end.text)) applyLoadedRoute(r, { skipRun:true });
+    if (saved.tab === 'base') showPanel('base');
+  }
+
+  // Delegated so controls that only exist later — via rows, fuel/toll price cells, booking times —
+  // are covered without having to remember to wire each one up.
+  document.addEventListener('input', saveState);
+  document.addEventListener('change', saveState);
+  document.addEventListener('click', saveState); // unit toggle, tab switch, add/remove via row
+
+  restoreState();
 })();
 </script>
 
