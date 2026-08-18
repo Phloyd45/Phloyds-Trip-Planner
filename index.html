@@ -1111,9 +1111,19 @@
           <label title="Filters to places OpenStreetMap has explicitly tagged as allowing dogs — most listings aren't tagged either way, so this narrows results rather than confirming everything else isn't pet-friendly."><input type="checkbox" id="filterPetFriendly"> 🐾 Pet-friendly only</label>
         </div>
       </div>
+
+      <div class="rowhead">7</div>
+      <div class="label-cell">Avoid (A7)</div>
+      <div class="input-cell">
+        <div class="amenity-filters">
+          <label><input type="checkbox" data-avoid="motorways"> 🛣 Motorways</label>
+          <label><input type="checkbox" data-avoid="tolls"> 💷 Toll roads</label>
+          <label><input type="checkbox" data-avoid="ferries"> ⛴ Ferries</label>
+        </div>
+      </div>
     </div>
     <div class="action-row">
-      <div class="rowhead">7</div>
+      <div class="rowhead">8</div>
       <div class="label-cell">Run</div>
       <div class="action-cell">
         <button id="calcBtn">Calculate route</button>
@@ -1122,7 +1132,7 @@
     </div>
 
     <div class="action-row">
-      <div class="rowhead">8</div>
+      <div class="rowhead">9</div>
       <div class="label-cell">Save / load</div>
       <div class="action-cell">
         <button id="saveRouteBtn" class="secondary-btn">⬇ Save route</button>
@@ -1133,7 +1143,7 @@
     </div>
 
     <div class="action-row">
-      <div class="rowhead">9</div>
+      <div class="rowhead">10</div>
       <div class="label-cell">Export</div>
       <div class="action-cell">
         <button id="exportGpxBtn" class="secondary-btn">⬇ Export GPX</button>
@@ -1242,7 +1252,7 @@
     </div>
 
     <div class="footnote">
-      Routing via OSRM · Geocoding &amp; nearby towns via OpenStreetMap Nominatim and Overpass. Driving times are engine estimates (no traffic, stops or borders factored in) — treat them as a planning starting point.
+      Routing via OSRM, switching to Valhalla whenever an avoidance option is ticked (the public OSRM servers can't do avoidance) · Geocoding &amp; nearby towns via OpenStreetMap Nominatim and Overpass. Driving times are engine estimates (no traffic, stops or borders factored in) — treat them as a planning starting point. Avoiding motorways or tolls can lengthen a trip considerably, so check the totals before committing to it.
     </div>
   </div>
 
@@ -1382,10 +1392,20 @@
           <option value="8">8 stops</option>
         </select>
       </div>
+
+      <div class="rowhead">6</div>
+      <div class="label-cell">Avoid (C6)</div>
+      <div class="input-cell">
+        <div class="amenity-filters">
+          <label><input type="checkbox" data-avoid="motorways"> 🛣 Motorways</label>
+          <label><input type="checkbox" data-avoid="tolls"> 💷 Toll roads</label>
+          <label><input type="checkbox" data-avoid="ferries"> ⛴ Ferries</label>
+        </div>
+      </div>
     </div>
 
     <div class="action-row">
-      <div class="rowhead">6</div>
+      <div class="rowhead">7</div>
       <div class="label-cell">Run</div>
       <div class="action-cell">
         <button id="cpBuildBtn">Build circular route</button>
@@ -1436,6 +1456,7 @@
 
   const NOMINATIM = 'https://nominatim.openstreetmap.org';
   const OSRM = 'https://router.project-osrm.org';
+  const VALHALLA = 'https://valhalla1.openstreetmap.de'; // used only when an avoidance option is set
 
   const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
@@ -1498,15 +1519,124 @@
   const routeCache = new Map(); // "lat,lon|lat,lon" -> route — lets re-adding a via reuse legs that haven't changed
   function coordKey(p){ return p.lat.toFixed(5)+','+p.lon.toFixed(5); }
 
-  async function getRoute(a, b){
-    const key = coordKey(a) + '|' + coordKey(b);
-    if (routeCache.has(key)) return routeCache.get(key);
+  /* ---------- Avoidance ---------- */
+  // The public OSRM servers reject the `exclude` parameter outright, so anything with an avoidance
+  // option set is routed through FOSSGIS's public Valhalla instead, which supports it natively as
+  // costing preferences. Plain routing stays on OSRM — it's quicker and already proven here.
+  const AVOID_KEYS = ['motorways','tolls','ferries'];
+
+  function avoidState(){
+    const s = {};
+    AVOID_KEYS.forEach(k=>{
+      const el = document.querySelector(`[data-avoid="${k}"]`);
+      s[k] = !!(el && el.checked);
+    });
+    return s;
+  }
+  function anyAvoid(a){ return AVOID_KEYS.some(k=>a[k]); }
+  function avoidTag(a){ return AVOID_KEYS.map(k=> a[k] ? k[0].toUpperCase() : '').join(''); }
+
+  // The same three options appear on the Road Trip and Circular Planner tabs; keep them in step so
+  // there's only ever one answer to "am I avoiding motorways?".
+  document.addEventListener('change', e=>{
+    const cb = e.target.closest('[data-avoid]');
+    if (!cb) return;
+    document.querySelectorAll(`[data-avoid="${cb.dataset.avoid}"]`).forEach(el=> el.checked = cb.checked);
+  });
+
+  function decodePolyline6(str){
+    const coords = [];
+    let index = 0, lat = 0, lon = 0;
+    while (index < str.length){
+      let result = 0, shift = 0, byte;
+      do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+      lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+      result = 0; shift = 0;
+      do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+      lon += (result & 1) ? ~(result >> 1) : (result >> 1);
+      coords.push([lon/1e6, lat/1e6]); // [lon,lat], matching OSRM's GeoJSON ordering
+    }
+    return coords;
+  }
+
+  // OSRM hands back per-coordinate-pair duration/distance arrays, which the leg splitter depends on.
+  // Valhalla doesn't, but each maneuver carries its own time and length over a span of shape points,
+  // so spreading those across the span by segment length reproduces the annotations closely enough —
+  // and because it works maneuver by maneuver, motorway and town speeds stay distinct.
+  function annotationsFromManeuvers(leg, coords){
+    const segCount = Math.max(0, coords.length-1);
+    const duration = new Array(segCount).fill(0);
+    const distance = new Array(segCount).fill(0);
+    (leg.maneuvers||[]).forEach(m=>{
+      const b = m.begin_shape_index, e = Math.min(m.end_shape_index, segCount);
+      if (b == null || e == null || e <= b) return;
+      const segs = [];
+      let tot = 0;
+      for (let i=b;i<e;i++){
+        const d = haversine(coords[i][1], coords[i][0], coords[i+1][1], coords[i+1][0]) * 1000;
+        segs.push(d); tot += d;
+      }
+      const mTime = m.time || 0, mLen = (m.length || 0) * 1000;
+      segs.forEach((d,k)=>{
+        const frac = tot > 0 ? d/tot : (segs.length ? 1/segs.length : 0);
+        duration[b+k] = mTime * frac;
+        distance[b+k] = mLen * frac;
+      });
+    });
+    return { duration, distance };
+  }
+
+  function valhallaCostingOptions(av){
+    const auto = {};
+    if (av.motorways) auto.use_highways = 0;
+    if (av.tolls) auto.use_tolls = 0;
+    if (av.ferries) auto.use_ferry = 0;
+    return { auto };
+  }
+
+  async function valhallaFetch(path, body){
+    const res = await fetch(`${VALHALLA}/${path}?json=${encodeURIComponent(JSON.stringify(body))}`);
+    if (!res.ok) throw new Error('Routing service unavailable — try again in a moment');
+    return res.json();
+  }
+
+  async function getRouteValhalla(a, b, av){
+    const data = await valhallaFetch('route', {
+      locations: [{lat:a.lat, lon:a.lon}, {lat:b.lat, lon:b.lon}],
+      costing: 'auto',
+      costing_options: valhallaCostingOptions(av),
+      directions_options: { units: 'kilometers' }
+    });
+    const trip = data.trip;
+    if (!trip || trip.status !== 0){
+      throw new Error((trip && trip.status_message) || 'No driving route found with those avoidance options');
+    }
+    const leg = trip.legs[0];
+    const coords = decodePolyline6(leg.shape);
+    return {
+      duration: trip.summary.time,
+      distance: trip.summary.length * 1000,
+      geometry: { coordinates: coords },
+      legs: [{ annotation: annotationsFromManeuvers(leg, coords) }],
+      uses: { toll: !!trip.summary.has_toll, ferry: !!trip.summary.has_ferry, highway: !!trip.summary.has_highway }
+    };
+  }
+
+  async function getRouteOsrm(a, b){
     const url = `${OSRM}/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson&annotations=duration,distance`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Routing service unavailable');
     const data = await res.json();
     if (data.code !== 'Ok' || !data.routes || !data.routes.length) throw new Error('No driving route found between those points');
-    const route = data.routes[0];
+    return data.routes[0];
+  }
+
+  async function getRoute(a, b){
+    const av = avoidState();
+    // avoidance is part of the cache key, so toggling an option never serves a stale route
+    const key = coordKey(a) + '|' + coordKey(b) + '|' + avoidTag(av);
+    if (routeCache.has(key)) return routeCache.get(key);
+    const route = anyAvoid(av) ? await getRouteValhalla(a, b, av) : await getRouteOsrm(a, b);
     routeCache.set(key, route);
     return route;
   }
@@ -3834,7 +3964,40 @@
 
   // One table request prices an entire candidate ring, so the radius search costs a handful of
   // cheap calls instead of a full set of route requests per iteration.
+  // Same measurement, via Valhalla's matrix, so a loop sized with avoidance on is sized against the
+  // roads it will actually be routed along rather than the motorway-happy version.
+  async function cpMeasureRingValhalla(base, radiusKm, n, av){
+    const seq = [base].concat(cpRingPoints(base, radiusKm, n));
+    const locs = seq.map(p=>({ lat:p.lat, lon:p.lon }));
+    const data = await valhallaFetch('sources_to_targets', {
+      sources: locs, targets: locs,
+      costing: 'auto',
+      costing_options: valhallaCostingOptions(av),
+      directions_options: { units:'kilometers' }
+    });
+    const M = data.sources_to_targets;
+    if (!M) throw new Error('Could not measure a loop from there');
+
+    let total = 0, totalDist = 0;
+    for (let i=0;i<seq.length;i++){
+      const cell = M[i] && M[i][(i+1)%seq.length];
+      if (!cell || cell.time == null) return null;
+      total += cell.time;
+      totalDist += (cell.distance || 0) * 1000;
+    }
+    const snapped = [];
+    for (let j=0;j<seq.length;j++){
+      const cell = M[0] && M[0][j];
+      if (!cell || cell.end_lat == null || cell.end_lon == null) return null;
+      snapped.push({ lat:cell.end_lat, lon:cell.end_lon, snap: haversine(seq[j].lat, seq[j].lon, cell.end_lat, cell.end_lon)*1000 });
+    }
+    if (snapped.slice(1).some(s=> s.snap > CP_MAX_SNAP_METERS)) return null;
+    return { total, totalDist, radiusKm, stops: snapped.slice(1) };
+  }
+
   async function cpMeasureRing(base, radiusKm, n){
+    const av = avoidState();
+    if (anyAvoid(av)) return cpMeasureRingValhalla(base, radiusKm, n, av);
     const seq = [base].concat(cpRingPoints(base, radiusKm, n));
     const coords = seq.map(p=>`${p.lon.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
     const res = await fetch(`${OSRM}/table/v1/driving/${coords}?annotations=duration,distance`);
@@ -4101,6 +4264,7 @@
             breakHours: cpBreakHours.value, breakMins: cpBreakMins.value,
             stops: cpStopsInput.value
           },
+          avoid: avoidState(),
           tab: Object.keys(PANELS).find(k=> $(PANELS[k].tab).classList.contains('active')) || 'road'
         }));
       } catch(e){
@@ -4127,6 +4291,12 @@
       $('bcTrails').checked     = !!bc.cats.trail;
       $('bcHistoric').checked   = !!bc.cats.historic;
       $('bcOutdoors').checked   = !!bc.cats.outdoors;
+    }
+
+    if (saved.avoid){
+      AVOID_KEYS.forEach(k=>{
+        document.querySelectorAll(`[data-avoid="${k}"]`).forEach(el=> el.checked = !!saved.avoid[k]);
+      });
     }
 
     const cp = saved.circular || {};
